@@ -61,6 +61,21 @@ ARCHETYPES = [
     {'id': 'هدايا_أنثى', 'g': 'female', 'label': 'تشتري هدايا', 'emoji': '🎀', 'age': (22, 45), 'price': (200, 800), 'prefers': ['رجالي', 'مشترك'], 'count': (2, 4)},
     {'id': 'محب_تسوق', 'g': 'male', 'label': 'محب تسوق', 'emoji': '🛍️', 'age': (22, 35), 'price': (100, 800), 'prefers': ['رجالي', 'مشترك'], 'count': (3, 6)},
     {'id': 'محبة_تسوق', 'g': 'female', 'label': 'محبة تسوق', 'emoji': '👛', 'age': (22, 35), 'price': (100, 800), 'prefers': ['نسائي', 'مشترك'], 'count': (3, 6)},
+    # ── شخصيات إضافية (توسعة) ──
+    {'id': 'مبتعث', 'g': 'male', 'label': 'شاب مبتعث', 'emoji': '✈️', 'age': (22, 30), 'price': (150, 900), 'prefers': ['رجالي', 'مشترك'], 'count': (2, 4)},
+    {'id': 'عسكري', 'g': 'male', 'label': 'منسوب عسكري', 'emoji': '🎖️', 'age': (24, 45), 'price': (150, 600), 'prefers': ['رجالي', 'مشترك'], 'count': (2, 4)},
+    {'id': 'معلم', 'g': 'male', 'label': 'معلم', 'emoji': '🧑‍🏫', 'age': (28, 50), 'price': (150, 500), 'prefers': ['رجالي', 'مشترك'], 'count': (2, 4)},
+    {'id': 'مهندس', 'g': 'male', 'label': 'مهندس', 'emoji': '👷', 'age': (26, 45), 'price': (200, 800), 'prefers': ['رجالي', 'مشترك'], 'count': (2, 4)},
+    {'id': 'طبيب', 'g': 'male', 'label': 'طبيب', 'emoji': '🩺', 'age': (30, 52), 'price': (300, 1500), 'prefers': ['رجالي', 'مشترك'], 'count': (2, 4)},
+    {'id': 'متذوق_نيش', 'g': 'male', 'label': 'متذوق نيش', 'emoji': '🌿', 'age': (25, 45), 'price': (400, 3000), 'prefers': ['رجالي', 'مشترك'], 'count': (3, 6)},
+    {'id': 'عامل_مقتصد', 'g': 'male', 'label': 'يدوّر العملي', 'emoji': '🧰', 'age': (25, 50), 'price': (0, 180), 'prefers': ['رجالي', 'مشترك'], 'count': (2, 3)},
+    {'id': 'وجيه', 'g': 'male', 'label': 'وجيه ومحب عود', 'emoji': '🕌', 'age': (45, 70), 'price': (300, 2000), 'prefers': ['رجالي', 'مشترك'], 'count': (2, 4)},
+    {'id': 'بدوي', 'g': 'male', 'label': 'محب البخور والعود', 'emoji': '🐪', 'age': (30, 60), 'price': (100, 800), 'prefers': ['رجالي', 'مشترك'], 'count': (2, 3)},
+    {'id': 'مؤثرة', 'g': 'female', 'label': 'مؤثرة عطور', 'emoji': '📸', 'age': (22, 35), 'price': (200, 1500), 'prefers': ['نسائي', 'مشترك'], 'count': (3, 6)},
+    {'id': 'معلمة', 'g': 'female', 'label': 'معلمة', 'emoji': '👩‍🏫', 'age': (28, 50), 'price': (150, 500), 'prefers': ['نسائي', 'مشترك'], 'count': (2, 4)},
+    {'id': 'طبيبة', 'g': 'female', 'label': 'طبيبة', 'emoji': '👩‍⚕️', 'age': (30, 50), 'price': (300, 1200), 'prefers': ['نسائي', 'مشترك'], 'count': (2, 4)},
+    {'id': 'متذوقة_نيش', 'g': 'female', 'label': 'متذوقة نيش', 'emoji': '🌸', 'age': (25, 45), 'price': (400, 2500), 'prefers': ['نسائي', 'مشترك'], 'count': (3, 5)},
+    {'id': 'ست_بيت', 'g': 'female', 'label': 'ست بيت', 'emoji': '🏠', 'age': (30, 55), 'price': (80, 400), 'prefers': ['نسائي', 'مشترك'], 'count': (2, 4)},
 ]
 
 # ═══════════════════════════════════════════════════════════
@@ -280,6 +295,7 @@ MASTER_PROMPT = """أنت {persona_name}، {persona_label}، عمرك {age}، م
 النمط المطلوب: {pattern_description}
 ## قواعد صارمة:
 - الطول: {min_words}-{max_words} كلمة فقط
+- {opening_rule}
 - {mention_rule}
 - {emoji_rule}
 - {typo_rule}
@@ -287,10 +303,32 @@ MASTER_PROMPT = """أنت {persona_name}، {persona_label}، عمرك {age}، م
 ## ممنوع منعاً باتاً:
 - لا تكتب بفصحى أو لغة رسمية
 - لا تبدأ بـ "لقد" أو "إن" أو "يعد" أو "هذا المنتج"
+- لا تبدأ التقييم باسم المنتج إطلاقاً — ابدأ بإحساسك أو رأيك أو موقفك
 - لا تضع نقاط bullet أو قوائم مرقمة
 - لا تكرر هذه الصياغات السابقة:
 {used_texts_block}
 أرجع JSON فقط: {{"rating": {rating}, "text": "..."}}"""
+
+
+# تنويع البدايات — كل تقييم يبدأ بأسلوب إنساني مختلف
+OPENING_STYLES = [
+    'ابدأ بانطباعك المباشر بدون مقدمة (مثل: صراحة.. / والله.. / بصراحة..)',
+    'ابدأ بوصف الإحساس أو الموقف اللي عشته مع العطر',
+    'ابدأ من نص القصة مباشرة كأنك تكمل كلام مع صاحبك',
+    'ابدأ بذكر المناسبة أو الوقت اللي استخدمته فيه',
+    'ابدأ برأيك في الريحة أو الثبات على طول',
+    'ابدأ بتعجب أو ردة فعل عفوية',
+    'ابدأ بمقارنة بسيطة أو توقع كان عندك قبل التجربة',
+    'ابدأ بسبب شرائك أو وش خلاك تطلبه',
+]
+
+# طرق متنوعة لذكر اسم المنتج (لا تكون أول الكلام أبداً)
+MENTION_STYLES = [
+    'اذكر اسم المنتج مرة وحدة في منتصف الكلام بشكل عابر — لا تبدأ فيه أبداً',
+    'مرر اسم المنتج داخل الجملة بطبيعية وخلِّ بدايتك إحساس أو رأي مو الاسم',
+    'اذكر اسمه قرب النهاية كأنك تتذكره، وابدأ التقييم بانطباعك',
+    'اذكر اسم المنتج بشكل عفوي وسط الجملة مو في أولها',
+]
 
 
 def build_master_prompt(persona, product_name, review_params, used_texts_block=''):
@@ -300,11 +338,14 @@ def build_master_prompt(persona, product_name, review_params, used_texts_block='
     pattern_info = REVIEW_PATTERNS.get(review_params['pattern'], REVIEW_PATTERNS['ultra_short'])
     min_words, max_words = pattern_info['words']
     
-    # قواعد خاصة
-    mention_rule = 'لا تذكر اسم المنتج' if not persona['mention_product'] else 'اذكر اسمه بشكل طبيعي'
+    # قواعد خاصة — تنويع ذكر الاسم وموضعه (لا يكون أول الكلام)
+    mention_rule = 'لا تذكر اسم المنتج' if not persona['mention_product'] else random.choice(MENTION_STYLES)
     # نمط "عن الريحة بدون ذكر الاسم" يفرض عدم ذكر الاسم بغض النظر عن تفضيل الشخصية
     if review_params['pattern'] == 'scent_no_name':
         mention_rule = 'لا تذكر اسم المنتج إطلاقاً — صف الريحة فقط'
+
+    # تنويع البداية في كل تقييم
+    opening_rule = random.choice(OPENING_STYLES)
     emoji_rule = 'بدون إيموجي نهائياً' if not persona['use_emoji'] else 'إيموجي واحد فقط'
     typo_rule = 'أضف خطأ إملائي طبيعي واحد' if persona['has_typo'] else 'بدون أخطاء إملائية'
     rating_note = '— اذكر سبب بسيط للنقص' if review_params['rating'] <= 3 else ''
@@ -325,6 +366,7 @@ def build_master_prompt(persona, product_name, review_params, used_texts_block='
         pattern_description=review_params['pattern_desc'],
         min_words=min_words,
         max_words=max_words,
+        opening_rule=opening_rule,
         mention_rule=mention_rule,
         emoji_rule=emoji_rule,
         typo_rule=typo_rule,
