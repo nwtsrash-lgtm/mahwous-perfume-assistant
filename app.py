@@ -1,5 +1,11 @@
 # -*- coding: utf-8 -*-
-import json, random, requests as http_req, time
+import sys, json, random, requests as http_req, time
+# ضمان ترميز UTF-8 للطباعة (يمنع تعطّل الإيموجي على كونسول Windows cp1256)
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except Exception:
+    pass
 from pathlib import Path
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
@@ -8,11 +14,70 @@ app = Flask(__name__)
 CORS(app)
 BASE_DIR = Path(__file__).parent
 
+# ═══════════════════════════════════════════════════════════
+# استيراد المحركات الجديدة (مع fallback آمن)
+# ═══════════════════════════════════════════════════════════
+try:
+    from personas_engine import generate_persona, generate_review_params, build_master_prompt, ARCHETYPES as NEW_ARCHETYPES
+    USE_NEW_PERSONAS = True
+    print('\u2705 personas_engine loaded')
+except ImportError:
+    USE_NEW_PERSONAS = False
+    print('\u26a0\ufe0f personas_engine not found, using legacy')
+
+try:
+    from dialects import get_dialect_for_city, get_dialect_examples, apply_typos
+    USE_DIALECTS = True
+    print('\u2705 dialects loaded')
+except ImportError:
+    USE_DIALECTS = False
+    print('\u26a0\ufe0f dialects not found')
+
+try:
+    from review_patterns import pick_pattern, pick_rating, get_pattern_description, REVIEW_PATTERNS, RATING_DISTRIBUTION
+    USE_PATTERNS = True
+    print('\u2705 review_patterns loaded')
+except ImportError:
+    USE_PATTERNS = False
+    print('\u26a0\ufe0f review_patterns not found')
+
+try:
+    from anti_repeat import (archive_review as ar_archive_review, archive_batch as ar_archive_batch,
+                             get_used_texts as ar_get_used_texts, get_archive_stats as ar_get_archive_stats,
+                             clear_archive as ar_clear_archive, format_used_texts_block, is_duplicate)
+    USE_ANTI_REPEAT = True
+    print('\u2705 anti_repeat loaded')
+except ImportError:
+    USE_ANTI_REPEAT = False
+    print('\u26a0\ufe0f anti_repeat not found')
+
+try:
+    from trending import calculate_product_weight, get_trending_names
+    USE_TRENDING = True
+    print('\u2705 trending loaded')
+except ImportError:
+    USE_TRENDING = False
+    print('\u26a0\ufe0f trending not found')
+
+try:
+    from mahalli_intel import (get_our_products as intel_get_our_products,
+                               get_competitors as intel_get_competitors,
+                               get_our_rank as intel_get_our_rank,
+                               get_priorities as intel_get_priorities,
+                               generate_daily_plan as intel_daily_plan,
+                               get_dashboard_summary as intel_dashboard,
+                               refresh_all_data as intel_refresh)
+    USE_INTEL = True
+    print('\u2705 mahalli_intel loaded')
+except ImportError:
+    USE_INTEL = False
+    print('\u26a0\ufe0f mahalli_intel not found')
+
 with open(BASE_DIR / 'names.json', 'r', encoding='utf-8') as f:
     NAMES = json.load(f)
 
 # ═══════════════════════════════════════════════════════════
-# أرشيف — يحفظ كل النصوص السابقة لمنع التكرار
+# أرشيف — يستخدم anti_repeat إذا متوفر، وإلا يعمل كالسابق
 # ═══════════════════════════════════════════════════════════
 ARCHIVE_FILE = BASE_DIR / 'archive.json'
 
@@ -26,16 +91,24 @@ def _load_archive():
     return {'reviews':[], 'store_reviews':[], 'personas':[]}
 
 def _save_archive(archive):
+    # FIFO: حد أقصى 200 تقييم
+    if len(archive.get('reviews', [])) > 200:
+        archive['reviews'] = archive['reviews'][-200:]
     with open(ARCHIVE_FILE, 'w', encoding='utf-8') as f:
         json.dump(archive, f, ensure_ascii=False, indent=1)
 
 def _get_used_texts(archive, limit=40):
     """آخر 40 نص مستخدم لإرسالها للـ AI"""
+    if USE_ANTI_REPEAT:
+        return ar_get_used_texts(limit)
     texts = [r.get('text','') for r in archive.get('reviews',[])]
     return texts[-limit:] if len(texts)>limit else texts
 
 def _archive_review(review_text, product_name, persona_name):
     """حفظ تقييم في الأرشيف"""
+    if USE_ANTI_REPEAT:
+        ar_archive_review(review_text, product_name, persona_name)
+        return
     arc = _load_archive()
     arc['reviews'].append({
         'text': review_text,
@@ -47,6 +120,9 @@ def _archive_review(review_text, product_name, persona_name):
 
 def _archive_batch(reviews, persona_name):
     """حفظ مجموعة تقييمات"""
+    if USE_ANTI_REPEAT:
+        ar_archive_batch(reviews, persona_name)
+        return
     arc = _load_archive()
     for rv in reviews:
         arc['reviews'].append({
@@ -57,7 +133,7 @@ def _archive_batch(reviews, persona_name):
         })
     _save_archive(arc)
 
-print(f'📦 الأرشيف: {len(_load_archive().get("reviews",[]))} تقييم محفوظ')
+print(f'\U0001f4e6 Archive: {len(_load_archive().get("reviews",[]))} reviews')
 
 # ═══════════════════════════════════════════════════════════
 # OpenRouter AI — نصوص فريدة لكل شخصية وعطر
@@ -98,113 +174,103 @@ def _ai_call(prompt, max_tokens=1200):
         return None
 
 def _ai_reviews(persona, perfumes):
-    """توليد تقييمات AI فريدة لكل عطر حسب الشخصية"""
-    pf_list = '\n'.join([f'{i+1}. {p["name"]} ({p["brand"]}, {p["price"]} ر.س)' for i,p in enumerate(perfumes)])
+    """توليد تقييمات AI فريدة لكل عطر — يستخدم MASTER_PROMPT المتقدم"""
+    # جلب النصوص المستخدمة
+    if USE_ANTI_REPEAT:
+        used_block = format_used_texts_block(limit=30)
+    else:
+        used = _get_used_texts(_load_archive())
+        used_block = '\n'.join([f'- {t}' for t in used[-30:]]) if used else ''
 
-    # جلب النصوص المستخدمة سابقاً
-    used = _get_used_texts(_load_archive())
-    used_block = ''
-    if used:
-        used_block = '\n\n⛔ لا تكرر أي صياغة مشابهة لهذه:\n' + '\n'.join([f'- {t}' for t in used[-30:]])
+    all_reviews = []
+    for pf in perfumes:
+        # توليد معايير التقييم لكل منتج
+        if USE_NEW_PERSONAS and USE_PATTERNS:
+            params = generate_review_params(persona)
+            prompt = build_master_prompt(persona, pf['name'], params, used_block)
+        else:
+            # fallback إلى البرومبت القديم
+            rating = 5 if random.random() < 0.6 else (4 if random.random() < 0.7 else 3)
+            prompt = f"""اكتب تقييم واحد كعميل سعودي حقيقي.
+العميل: {persona['label']}، {'رجل' if persona['gender']=='male' else 'امرأة'}، {persona['age']} سنة، من {persona['city']}
+العطر: {pf['name']}
+اكتب 3-20 كلمة بلهجة سعودية. التقييم {rating} نجوم.
+{'لا تكرر: ' + used_block if used_block else ''}
+أرجع JSON فقط: {{"rating": {rating}, "text": "التقييم"}}"""
+            params = {'rating': rating, 'pattern': 'scent_no_name'}
 
-    prompt = f"""أنت عميل سعودي حقيقي يكتب تقييمات على متجر عطور إلكتروني.
+        result = _ai_call(prompt, max_tokens=400)
+        if not result:
+            all_reviews.append(_fallback_single(pf))
+            continue
 
-بيانات الشخصية:
-- {persona['label']}، {'رجل' if persona['gender']=='male' else 'امرأة'}، {persona['age']} سنة، من {persona['city']}
-
-العطور:
-{pf_list}
-
-## قواعد كتابة التقييم (مبنية على تحليل تقييمات حقيقية):
-
-1. الطول: من 3 كلمات إلى 25 كلمة فقط. بعضها قصير جداً مثل "ممتاز" أو "روعة" أو "حلو مرة"
-2. لا تذكر اسم العطر في كل تقييم. بعض العملاء يكتبون فقط رأيهم بدون ذكر الاسم
-3. لا تضع إيموجي أو نقاط أو علامات ترقيم إلا نادراً وبشكل طبيعي
-4. لا تبدأ كل تقييم بنفس الطريقة. نوّع بشكل كبير
-5. اكتب بلهجة عامية سعودية طبيعية حسب مدينة الشخص:
-   - الرياض/القصيم/حائل: نجدية (مرة، وايد حلو، ذا الشي، كفو)
-   - جدة/مكة/المدينة: حجازية (كتير، قوي، يا سلام، حبيته)
-   - الدمام/الخبر: شرقية (حلو، يجنن، مرة حلو، فله)
-6. أنماط التقييمات الحقيقية (نوّع بينها):
-   - تقييم قصير جداً: "ممتاز" / "جميل" / "روعة مو طبيعي" / "كفو"
-   - عن التوصيل: "وصلني بسرعة" / "الشحن سريع ماشاء الله"
-   - عن التغليف: "التغليف نظيف ومرتب" / "وصل مغلف بشكل فخم"
-   - عن الثبات: "يثبت طول اليوم" / "الثبات خرافي"
-   - عن الريحة بدون ذكر الاسم: "ريحته فخمة" / "الريحة تجنن"
-   - تجربة شخصية: "جربته وطلع روعة" / "استخدمته شهر كامل"
-   - هدية: "جبته هدية وانبسطوا فيه" / "هديت خوي وعجبه"
-   - مقارنة: "أحسن من اللي عندي" / "سعره أحلى من المحلات"
-   - تكرار شراء: "ثاني مرة أطلب" / "مو أول مرة وبإذن الله مو الأخيرة"
-   - مع ملاحظة بسيطة: "حلو بس خفيف شوي" / "كويس بس التوصيل تأخر"
-7. التقييم 5 نجوم في الغالب، أحياناً 4، ونادراً 3
-8. لا تكتب تقييم أطول من سطر واحد. الواقعية أهم من الكمال
-{used_block}
-
-أرجع JSON فقط بدون أي نص:
-[
-  {{"product": "اسم العطر", "rating": 5, "text": "التقييم"}},
-  ...
-]"""
-
-    result = _ai_call(prompt, max_tokens=2000)
-    if not result:
-        return _fallback_reviews(persona, perfumes)
-
-    # تنظيف الرد
-    result = result.strip()
-    if result.startswith('```'):
-        result = result.split('\n', 1)[1] if '\n' in result else result[3:]
-        if result.endswith('```'):
-            result = result[:-3]
+        # تنظيف الرد
         result = result.strip()
+        if result.startswith('```'):
+            result = result.split('\n', 1)[1] if '\n' in result else result[3:]
+            if result.endswith('```'):
+                result = result[:-3]
+            result = result.strip()
 
-    try:
-        reviews = json.loads(result)
-        # تقييم واحد فقط لكل منتج — لا أكثر
-        reviews = reviews[:len(perfumes)]
-        seen_texts = set()
-        final = []
-        for i, rv in enumerate(reviews):
-            if i < len(perfumes):
-                rv['price'] = perfumes[i]['price']
-                rv['brand'] = perfumes[i]['brand']
-                rv['pg'] = perfumes[i]['g']
-                rv['product'] = perfumes[i]['name']
-                # منع تكرار نفس النص
-                txt = rv.get('text','').strip()
-                if txt in seen_texts:
-                    txt = txt + ' 👍' if not txt.endswith('👍') else txt[:-2]
-                seen_texts.add(txt)
-                rv['text'] = txt
-                final.append(rv)
-        # حفظ في الأرشيف
-        _archive_batch(final, persona.get('name',''))
-        return final
-    except:
-        return _fallback_reviews(persona, perfumes)
+        try:
+            rv = json.loads(result)
+            rv['price'] = pf['price']
+            rv['brand'] = pf['brand']
+            rv['pg'] = pf['g']
+            rv['product'] = pf['name']
+            rv['pattern'] = params.get('pattern', '')
+
+            # تطبيق أخطاء إملائية إذا الشخصية تحتاج
+            if USE_DIALECTS and persona.get('has_typo', False):
+                rv['text'] = apply_typos(rv['text'], probability=1.0)
+
+            # التحقق من التكرار — أعد التوليد بنص مختلف بدل إضافة فراغ بلا معنى
+            if USE_ANTI_REPEAT and is_duplicate(rv.get('text', '')):
+                retry = _ai_call(
+                    prompt + '\n\n⚠️ تنبيه: التقييم السابق كان مكرراً. اكتب نصاً مختلفاً تماماً ببداية وكلمات مختلفة.',
+                    max_tokens=400)
+                if retry:
+                    retry = retry.strip()
+                    if retry.startswith('```'):
+                        retry = retry.split('\n', 1)[1] if '\n' in retry else retry[3:]
+                        if retry.endswith('```'):
+                            retry = retry[:-3]
+                        retry = retry.strip()
+                    try:
+                        rv2 = json.loads(retry)
+                        if rv2.get('text') and not is_duplicate(rv2['text']):
+                            rv['text'] = rv2['text']
+                            if 'rating' in rv2:
+                                rv['rating'] = rv2['rating']
+                    except Exception:
+                        pass
+
+            all_reviews.append(rv)
+        except:
+            all_reviews.append(_fallback_single(pf))
+
+    # حفظ في الأرشيف
+    _archive_batch(all_reviews, persona.get('name', ''))
+    return all_reviews
 
 def _ai_single_review(persona, product):
-    """توليد تقييم واحد بالـ AI"""
-    used = _get_used_texts(_load_archive(), limit=20)
-    used_block = ''
-    if used:
-        used_block = '\n⛔ لا تكرر هذه النصوص السابقة:\n' + '\n'.join([f'- {t}' for t in used[-15:]])
+    """توليد تقييم واحد بالـ AI — يستخدم MASTER_PROMPT المتقدم"""
+    if USE_ANTI_REPEAT:
+        used_block = format_used_texts_block(limit=15)
+    else:
+        used = _get_used_texts(_load_archive(), limit=20)
+        used_block = '\n'.join([f'- {t}' for t in used[-15:]]) if used else ''
 
-    prompt = f"""اكتب تقييم واحد فقط كعميل سعودي حقيقي.
-
+    if USE_NEW_PERSONAS and USE_PATTERNS:
+        params = generate_review_params(persona)
+        prompt = build_master_prompt(persona, product['name'], params, used_block)
+    else:
+        prompt = f"""اكتب تقييم واحد فقط كعميل سعودي حقيقي.
 العميل: {persona['label']}، {'رجل' if persona['gender']=='male' else 'امرأة'}، {persona['age']} سنة، من {persona['city']}
 العطر: {product['name']}
-
-القواعد:
-- اكتب من 3 إلى 20 كلمة فقط
-- ليس ضروري تذكر اسم العطر
-- بدون إيموجي
-- لهجة سعودية عامية طبيعية
-- التقييم 4 أو 5
-{used_block}
-
-أرجع JSON فقط:
-{{"rating": 5, "text": "التقييم"}}"""
+اكتب 3-20 كلمة بلهجة سعودية. التقييم 4 أو 5.
+{'لا تكرر: ' + used_block if used_block else ''}
+أرجع JSON فقط: {{"rating": 5, "text": "التقييم"}}"""
 
     result = _ai_call(prompt, max_tokens=300)
     if not result:
@@ -222,7 +288,8 @@ def _ai_single_review(persona, product):
         rv['price'] = product['price']
         rv['brand'] = product['brand']
         rv['pg'] = product.get('g','مشترك')
-        # حفظ في الأرشيف
+        if USE_DIALECTS and persona.get('has_typo', False):
+            rv['text'] = apply_typos(rv['text'], probability=1.0)
         _archive_review(rv['text'], product['name'], persona.get('name',''))
         return rv
     except:
@@ -335,7 +402,7 @@ TRENDING_BRANDS = [
 ]
 
 def _pick_products(arch):
-    """اختيار عطور ذكية حسب الشخصية مع ترجيح الترند"""
+    """اختيار عطور ذكية حسب الشخصية مع ترجيح الترند المتقدم"""
     pool = [p for p in PRODUCTS if p['g'] in arch['prefers']
             and arch['price'][0] <= p['price'] <= arch['price'][1]]
     if len(pool) < 3:
@@ -343,13 +410,17 @@ def _pick_products(arch):
     if len(pool) < 3:
         pool = PRODUCTS[:]
 
-    trend_lower = [b.lower() for b in TRENDING_BRANDS]
-    weights = []
-    for p in pool:
-        brand = p.get('brand','').lower()
-        name = p.get('name','').lower()
-        is_trend = any(tb in brand or tb in name for tb in trend_lower)
-        weights.append(3.0 if is_trend else 1.0)
+    # استخدام محرك الترند المتقدم إذا متوفر
+    if USE_TRENDING:
+        weights = [calculate_product_weight(p.get('name',''), p.get('brand','')) for p in pool]
+    else:
+        trend_lower = [b.lower() for b in TRENDING_BRANDS]
+        weights = []
+        for p in pool:
+            brand = p.get('brand','').lower()
+            name = p.get('name','').lower()
+            is_trend = any(tb in brand or tb in name for tb in trend_lower)
+            weights.append(3.0 if is_trend else 1.0)
 
     count = random.randint(*arch['count'])
     count = min(count, len(pool))
@@ -429,25 +500,30 @@ def _national_address(city_name):
     }
 
 # ═══════════ رقم جوال سعودي ═══════════
-SAUDI_PREFIXES = ['050','051','053','054','055','056','057','058','059']
+SAUDI_PREFIXES = ['050','053','054','055','056','057','058','059']
 def _phone():
     return random.choice(SAUDI_PREFIXES) + ''.join([str(random.randint(0,9)) for _ in range(7)])
 
 # ═══════════ توليد شخصية كاملة ═══════════
 def _gen_one():
-    arch = random.choice(ARCHETYPES)
-    age = random.randint(*arch['age'])
+    """توليد شخصية كاملة — يستخدم المحرك الجديد إذا متوفر"""
+    if USE_NEW_PERSONAS:
+        # المحرك الجديد: شخصية عميقة بـ 7 أبعاد
+        persona = generate_persona()
+        arch = next((a for a in ARCHETYPES if a['id'] == persona['archId']), random.choice(ARCHETYPES))
+    else:
+        # المحرك القديم
+        arch = random.choice(ARCHETYPES)
+        age = random.randint(*arch['age'])
+        city = _city()
+        addr = _national_address(city)
+        persona = {
+            'name': _name(arch['g']), 'city': city, 'gender': arch['g'], 'age': age,
+            'label': arch['label'], 'emoji': arch['emoji'], 'archId': arch['id'],
+            'address': addr, 'phone': _phone()
+        }
+
     perfumes = _pick_products(arch)
-
-    city = _city()
-    addr = _national_address(city)
-    persona = {
-        'name': _name(arch['g']), 'city': city, 'gender': arch['g'], 'age': age,
-        'label': arch['label'], 'emoji': arch['emoji'], 'archId': arch['id'],
-        'address': addr, 'phone': _phone()
-    }
-
-    # تقييمات بالذكاء الاصطناعي
     reviews = _ai_reviews(persona, perfumes)
     store = _ai_store_review(persona)
 
@@ -511,18 +587,94 @@ def archive_stats():
                     for r in arc.get('reviews',[])[-10:]]
     })
 
+@app.route('/api/archive/stats', methods=['GET'])
+def archive_stats_detail():
+    """إحصائيات الأرشيف التفصيلية (العدد الحالي + الحد الأقصى)"""
+    if USE_ANTI_REPEAT:
+        try:
+            return jsonify(ar_get_archive_stats())
+        except Exception as e:
+            print(f'⚠️ archive stats error: {e}')
+    arc = _load_archive()
+    return jsonify({'total': len(arc.get('reviews', [])), 'max': 200})
+
 @app.route('/api/archive/clear', methods=['POST'])
 def archive_clear():
-    _save_archive({'reviews':[], 'store_reviews':[], 'personas':[]})
+    if USE_ANTI_REPEAT:
+        ar_clear_archive()
+    else:
+        _save_archive({'reviews':[], 'store_reviews':[], 'personas':[]})
     return jsonify({'status':'ok','message':'تم مسح الأرشيف'})
+
+# ═══════════════════════════════════════════════════════════
+# API استخبارات محلي (Algolia Intelligence)
+# ═══════════════════════════════════════════════════════════
+
+@app.route('/api/intel/our-products', methods=['GET'])
+def api_intel_products():
+    """جلب منتجاتنا من Algolia"""
+    if not USE_INTEL:
+        return jsonify({'error': 'mahalli_intel not available'}), 503
+    products = intel_get_our_products()
+    return jsonify({'products': products, 'count': len(products)})
+
+@app.route('/api/intel/competitors/<path:product_name>', methods=['GET'])
+def api_intel_competitors(product_name):
+    """جلب المنافسين لمنتج"""
+    if not USE_INTEL:
+        return jsonify({'error': 'mahalli_intel not available'}), 503
+    competitors = intel_get_competitors(product_name)
+    return jsonify({'competitors': competitors, 'count': len(competitors)})
+
+@app.route('/api/intel/our-rank/<path:query>', methods=['GET'])
+def api_intel_rank(query):
+    """ترتيبنا لكلمة بحث"""
+    if not USE_INTEL:
+        return jsonify({'error': 'mahalli_intel not available'}), 503
+    rank, product = intel_get_our_rank(query)
+    return jsonify({'rank': rank, 'product': product, 'query': query})
+
+@app.route('/api/intel/priorities', methods=['GET'])
+def api_intel_priorities():
+    """قائمة الأولويات"""
+    if not USE_INTEL:
+        return jsonify({'error': 'mahalli_intel not available'}), 503
+    priorities = intel_get_priorities()
+    return jsonify({'priorities': priorities})
+
+@app.route('/api/intel/daily-plan', methods=['GET'])
+def api_intel_daily():
+    """خطة اليوم"""
+    if not USE_INTEL:
+        return jsonify({'error': 'mahalli_intel not available'}), 503
+    plan = intel_daily_plan()
+    return jsonify(plan)
+
+@app.route('/api/intel/dashboard', methods=['GET'])
+def api_intel_dashboard():
+    """ملخص لوحة التحكم"""
+    if not USE_INTEL:
+        return jsonify({'error': 'mahalli_intel not available'}), 503
+    summary = intel_dashboard()
+    return jsonify(summary)
+
+@app.route('/api/intel/refresh', methods=['POST'])
+def api_intel_refresh():
+    """تحديث البيانات من Algolia"""
+    if not USE_INTEL:
+        return jsonify({'error': 'mahalli_intel not available'}), 503
+    result = intel_refresh()
+    return jsonify(result)
 
 if __name__ == '__main__':
     arc = _load_archive()
     print('='*50)
-    print('🌸 مساعدي في شراء العطور — AI Mode')
-    print(f'   {len(ARCHETYPES)} شخصية × {len(PRODUCTS)} عطر')
+    print('Perfume Assistant - AI Mode (Enhanced)')
+    print(f'   {len(ARCHETYPES)} archetypes x {len(PRODUCTS)} products')
     print(f'   AI: {AI_MODEL}')
-    print(f'   📦 أرشيف: {len(arc.get("reviews",[]))} تقييم محفوظ')
+    print(f'   Archive: {len(arc.get("reviews",[]))} reviews (max 200 FIFO)')
+    print(f'   New Engines: Personas={USE_NEW_PERSONAS} Dialects={USE_DIALECTS} Patterns={USE_PATTERNS}')
+    print(f'   Anti-Repeat={USE_ANTI_REPEAT} Trending={USE_TRENDING} Intel={USE_INTEL}')
     print('   http://localhost:5000')
     print('='*50)
     app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)

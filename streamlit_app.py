@@ -1,169 +1,377 @@
 # -*- coding: utf-8 -*-
+"""
+🌸 مساعدي في شراء العطور — واجهة Streamlit الرئيسية
+تطبيق ذكي لتوليد شخصيات وتقييمات عطور بالذكاء الاصطناعي
+مع لوحة استخبارات محلي وتصدير CSV
+"""
 import streamlit as st
-import json, random, requests as http_req, time, os
+import sys, json, random, time, os, csv, io
+import requests as http_req
 from pathlib import Path
+from datetime import datetime
 
-st.set_page_config(page_title="🌸 مساعدي في شراء العطور", layout="centered", initial_sidebar_state="collapsed")
+# ضمان ترميز UTF-8 للطباعة (يمنع تعطّل الإيموجي على كونسول Windows cp1256)
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except Exception:
+    pass
+
+# ═══════════════════════════════════════════════════════════
+#  إعدادات الصفحة (يجب أن تكون أول أمر Streamlit)
+# ═══════════════════════════════════════════════════════════
+st.set_page_config(
+    page_title="🌸 مساعدي في شراء العطور",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 
 BASE_DIR = Path(__file__).parent
 
-# ═══════════ تحميل البيانات ═══════════
+# ═══════════════════════════════════════════════════════════
+#  استيراد المحركات الجديدة مع try/except
+# ═══════════════════════════════════════════════════════════
+USE_NEW_PERSONAS = False
+USE_DIALECTS = False
+USE_REVIEW_PATTERNS = False
+USE_ANTI_REPEAT = False
+USE_TRENDING = False
+USE_MAHALLI = False
+
+try:
+    from personas_engine import (
+        generate_persona, generate_review_params, build_master_prompt,
+        ARCHETYPES, CITY_DATA as PE_CITY_DATA,
+    )
+    USE_NEW_PERSONAS = True
+except ImportError:
+    pass
+
+try:
+    from dialects import get_dialect_for_city, get_dialect_data, get_dialect_examples, apply_typos
+    USE_DIALECTS = True
+except ImportError:
+    pass
+
+try:
+    from review_patterns import pick_pattern, pick_rating, get_pattern_description, REVIEW_PATTERNS
+    USE_REVIEW_PATTERNS = True
+except ImportError:
+    pass
+
+try:
+    from anti_repeat import get_used_texts as ar_get_used_texts, archive_review, MAX_ARCHIVE
+    USE_ANTI_REPEAT = True
+except ImportError:
+    MAX_ARCHIVE = 200
+
+try:
+    from trending import get_trending_brands, get_weight_for_product
+    USE_TRENDING = True
+except ImportError:
+    pass
+
+try:
+    from mahalli_intel import (
+        get_our_products, get_competitors, get_our_rank, get_priorities,
+        generate_daily_plan, get_dashboard_summary, refresh_all_data,
+        is_cache_stale, get_cache_age, TOP_SEARCHES, SAFETY_RULES,
+    )
+    USE_MAHALLI = True
+except ImportError:
+    pass
+
+# ═══════════════════════════════════════════════════════════
+#  تحميل البيانات الأساسية
+# ═══════════════════════════════════════════════════════════
+
 @st.cache_data
 def load_names():
-    with open(BASE_DIR / 'names.json', 'r', encoding='utf-8') as f:
-        return json.load(f)
+    """تحميل ملف الأسماء"""
+    try:
+        with open(BASE_DIR / 'names.json', 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {'male': ['محمد'], 'female': ['نورة'], 'family_names': ['السعودي'],
+                'cities': [{'name': 'الرياض', 'weight': 1}]}
 
 @st.cache_data
 def load_catalog():
-    with open(BASE_DIR / 'catalog.json', 'r', encoding='utf-8') as f:
-        return json.load(f)
+    """تحميل كتالوج المنتجات"""
+    try:
+        with open(BASE_DIR / 'catalog.json', 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return []
 
 NAMES = load_names()
 PRODUCTS = load_catalog()
 
-# ═══════════ AI ═══════════
+# ═══════════════════════════════════════════════════════════
+#  مفتاح AI — من البيئة أو .env
+# ═══════════════════════════════════════════════════════════
 AI_KEY = os.environ.get('AI_KEY', '')
 if not AI_KEY:
     _env = BASE_DIR / '.env'
     if _env.exists():
-        for line in _env.read_text(encoding='utf-8').strip().split('\n'):
-            if '=' in line and not line.startswith('#'):
-                k, v = line.split('=', 1)
-                if k.strip() == 'AI_KEY':
-                    AI_KEY = v.strip()
+        try:
+            for line in _env.read_text(encoding='utf-8').strip().split('\n'):
+                if '=' in line and not line.startswith('#'):
+                    k, v = line.split('=', 1)
+                    if k.strip() == 'AI_KEY':
+                        AI_KEY = v.strip()
+        except Exception:
+            pass
+
 AI_URL = 'https://openrouter.ai/api/v1/chat/completions'
 AI_MODEL = 'google/gemini-2.5-flash'
 
+# ═══════════════════════════════════════════════════════════
+#  دوال AI
+# ═══════════════════════════════════════════════════════════
+
 def ai_call(prompt, max_tokens=1200):
+    """استدعاء API الذكاء الاصطناعي عبر OpenRouter"""
     try:
         r = http_req.post(AI_URL, headers={
             'Authorization': f'Bearer {AI_KEY}',
             'Content-Type': 'application/json',
         }, json={
             'model': AI_MODEL,
-            'messages': [{'role':'user','content':prompt}],
-            'max_tokens': max_tokens, 'temperature': 1.0,
+            'messages': [{'role': 'user', 'content': prompt}],
+            'max_tokens': max_tokens,
+            'temperature': 1.0,
         }, timeout=60)
         data = r.json()
         if r.status_code != 200:
             return None
         return data['choices'][0]['message']['content'].strip()
-    except:
+    except Exception:
         return None
 
 def clean_json(result):
+    """تنظيف JSON من Markdown fencing"""
     result = result.strip()
     if result.startswith('```'):
         result = result.split('\n', 1)[1] if '\n' in result else result[3:]
-        if result.endswith('```'): result = result[:-3]
+        if result.endswith('```'):
+            result = result[:-3]
     return result.strip()
 
-# ═══════════ أرشيف ═══════════
+# ═══════════════════════════════════════════════════════════
+#  أرشيف التقييمات
+# ═══════════════════════════════════════════════════════════
 ARCHIVE_FILE = BASE_DIR / 'archive.json'
 
 def load_archive():
+    """تحميل أرشيف التقييمات"""
     if ARCHIVE_FILE.exists():
         try:
             with open(ARCHIVE_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except:
-            return {'reviews':[]}
-    return {'reviews':[]}
+        except Exception:
+            return {'reviews': []}
+    return {'reviews': []}
 
 def save_archive(arc):
+    """حفظ الأرشيف مع حد أقصى"""
+    if len(arc.get('reviews', [])) > MAX_ARCHIVE:
+        arc['reviews'] = arc['reviews'][-MAX_ARCHIVE:]
     with open(ARCHIVE_FILE, 'w', encoding='utf-8') as f:
-        json.dump(arc, f, ensure_ascii=False)
+        json.dump(arc, f, ensure_ascii=False, indent=1)
 
 def get_used_texts(limit=40):
+    """جلب آخر النصوص المستخدمة لمنع التكرار"""
+    if USE_ANTI_REPEAT:
+        return ar_get_used_texts(limit)
     arc = load_archive()
-    texts = [r.get('text','') for r in arc.get('reviews',[])]
+    texts = [r.get('text', '') for r in arc.get('reviews', [])]
     return texts[-limit:]
 
 def archive_batch(reviews, persona_name):
+    """أرشفة دفعة من التقييمات"""
     arc = load_archive()
     for rv in reviews:
-        arc['reviews'].append({'text':rv.get('text',''),'product':rv.get('product',''),
-                               'persona':persona_name,'ts':int(time.time())})
+        entry = {
+            'text': rv.get('text', ''),
+            'product': rv.get('product', ''),
+            'persona': persona_name,
+            'ts': int(time.time()),
+        }
+        arc['reviews'].append(entry)
     save_archive(arc)
 
-# ═══════════ شخصيات ═══════════
-ARCHETYPES = [
-    {'id':'شاب_جامعي','g':'male','label':'شاب جامعي','emoji':'🎓','age':(18,23),'price':(0,300),'prefers':['رجالي','مشترك'],'count':(2,4)},
-    {'id':'رجل_أعمال','g':'male','label':'رجل أعمال','emoji':'👔','age':(30,50),'price':(400,2000),'prefers':['رجالي','مشترك'],'count':(3,6)},
-    {'id':'خبير_عطور','g':'male','label':'خبير عطور','emoji':'🧪','age':(25,40),'price':(200,2000),'prefers':['رجالي','مشترك'],'count':(3,7)},
-    {'id':'أب_عائلة','g':'male','label':'أب عائلة','emoji':'👨‍👧','age':(35,55),'price':(100,500),'prefers':['رجالي','مشترك'],'count':(2,4)},
-    {'id':'شاب_رياضي','g':'male','label':'شاب رياضي','emoji':'💪','age':(20,30),'price':(100,400),'prefers':['رجالي','مشترك'],'count':(2,4)},
-    {'id':'كبير_سن','g':'male','label':'رجل كبير','emoji':'👴','age':(55,75),'price':(100,600),'prefers':['رجالي','مشترك'],'count':(2,3)},
-    {'id':'موظف','g':'male','label':'موظف','emoji':'🏢','age':(25,45),'price':(150,500),'prefers':['رجالي','مشترك'],'count':(2,4)},
-    {'id':'بنت_عصرية','g':'female','label':'بنت عصرية','emoji':'💅','age':(20,28),'price':(100,600),'prefers':['نسائي','مشترك'],'count':(3,6)},
-    {'id':'أم_سعودية','g':'female','label':'أم سعودية','emoji':'👩‍🦱','age':(38,55),'price':(100,800),'prefers':['نسائي','مشترك'],'count':(2,5)},
-    {'id':'عروس','g':'female','label':'عروس','emoji':'👰','age':(21,30),'price':(300,2000),'prefers':['نسائي','مشترك'],'count':(4,8)},
-    {'id':'موظفة','g':'female','label':'موظفة','emoji':'👩‍💻','age':(24,40),'price':(150,600),'prefers':['نسائي','مشترك'],'count':(2,4)},
-    {'id':'خبيرة_تجميل','g':'female','label':'خبيرة تجميل','emoji':'💄','age':(25,38),'price':(200,1000),'prefers':['نسائي','مشترك'],'count':(3,6)},
-    {'id':'طالبة','g':'female','label':'طالبة جامعية','emoji':'📚','age':(18,23),'price':(0,250),'prefers':['نسائي','مشترك'],'count':(2,3)},
-    {'id':'جدة','g':'female','label':'سيدة كبيرة','emoji':'👵','age':(55,75),'price':(100,500),'prefers':['نسائي','مشترك'],'count':(2,3)},
-    {'id':'مقارن','g':'male','label':'مقارن أسعار','emoji':'📊','age':(25,40),'price':(100,600),'prefers':['رجالي','مشترك'],'count':(3,5)},
-    {'id':'هدايا_رجل','g':'male','label':'يشتري هدايا','emoji':'🎁','age':(25,45),'price':(200,1000),'prefers':['نسائي','مشترك'],'count':(2,4)},
-    {'id':'هدايا_أنثى','g':'female','label':'تشتري هدايا','emoji':'🎀','age':(22,45),'price':(200,800),'prefers':['رجالي','مشترك'],'count':(2,4)},
-    {'id':'محب_تسوق','g':'male','label':'محب تسوق','emoji':'🛍️','age':(22,35),'price':(100,800),'prefers':['رجالي','مشترك'],'count':(3,6)},
-    {'id':'محبة_تسوق','g':'female','label':'محبة تسوق','emoji':'👛','age':(22,35),'price':(100,800),'prefers':['نسائي','مشترك'],'count':(3,6)},
+# ═══════════════════════════════════════════════════════════
+#  Fallback: شخصيات قديمة (عند عدم وجود personas_engine)
+# ═══════════════════════════════════════════════════════════
+
+FALLBACK_ARCHETYPES = [
+    {'id': 'شاب_جامعي', 'g': 'male', 'label': 'شاب جامعي', 'emoji': '🎓',
+     'age': (18, 23), 'price': (0, 300), 'prefers': ['رجالي', 'مشترك'], 'count': (2, 4)},
+    {'id': 'رجل_أعمال', 'g': 'male', 'label': 'رجل أعمال', 'emoji': '👔',
+     'age': (30, 50), 'price': (400, 2000), 'prefers': ['رجالي', 'مشترك'], 'count': (3, 6)},
+    {'id': 'بنت_عصرية', 'g': 'female', 'label': 'بنت عصرية', 'emoji': '💅',
+     'age': (20, 28), 'price': (100, 600), 'prefers': ['نسائي', 'مشترك'], 'count': (3, 6)},
+    {'id': 'أم_سعودية', 'g': 'female', 'label': 'أم سعودية', 'emoji': '👩‍🦱',
+     'age': (38, 55), 'price': (100, 800), 'prefers': ['نسائي', 'مشترك'], 'count': (2, 5)},
+    {'id': 'عروس', 'g': 'female', 'label': 'عروس', 'emoji': '👰',
+     'age': (21, 30), 'price': (300, 2000), 'prefers': ['نسائي', 'مشترك'], 'count': (4, 8)},
 ]
 
-TRENDING = ['ديور','شانيل','توم فورد','لطافة','أرماني','بربري','كارولينا','لانكوم','فرساتشي','جوتشي','جان بول','أمواج','نارسيسو','بولغاري','كالفن','مونت بلانك','دولتشي','بوشرون','هوجو','جيرلان','كريد','سوفاج','خمرة']
-TREND_LOW = [b.lower() for b in TRENDING]
-
-# ═══════════ عناوين ═══════════
-CITY_DATA = {
-    'الرياض':{'postal':(11411,13999),'dists':[('العليا','شارع العليا'),('النخيل','شارع الأمير محمد'),('الملقا','طريق أنس بن مالك'),('الياسمين','شارع عبدالرحمن الداخل'),('حطين','شارع التخصصي'),('الورود','شارع الورود')]},
-    'جدة':{'postal':(21411,23999),'dists':[('الحمراء','شارع فلسطين'),('الروضة','شارع الأمير سلطان'),('الشاطئ','طريق الكورنيش'),('البوادي','شارع الأمير ماجد'),('النعيم','شارع حراء')]},
-    'الدمام':{'postal':(31411,34999),'dists':[('الشاطئ','طريق الكورنيش'),('الفيصلية','شارع الملك فيصل'),('الريان','شارع الريان')]},
-    'مكة المكرمة':{'postal':(21955,24999),'dists':[('العزيزية','طريق الملك عبدالعزيز'),('الشوقية','شارع الشوقية'),('النسيم','شارع النسيم')]},
-    'المدينة المنورة':{'postal':(41411,42999),'dists':[('العزيزية','طريق الملك عبدالله'),('قربان','شارع قربان'),('الدفاع','شارع أبو بكر الصديق')]},
-    'الخبر':{'postal':(31411,34999),'dists':[('الحزام الذهبي','شارع الأمير تركي'),('اليرموك','شارع اليرموك'),('العليا','شارع الأمير فيصل')]},
-    'أبها':{'postal':(61411,62999),'dists':[('المنسك','شارع الملك فيصل'),('المفتاحة','شارع الفن')]},
-    'تبوك':{'postal':(71411,71999),'dists':[('المروج','شارع الأمير فهد'),('الفيصلية','طريق الملك فهد')]},
-    'بريدة':{'postal':(51411,52999),'dists':[('الصفراء','شارع الخبيب'),('الفايزية','طريق الملك عبدالعزيز')]},
-    'حائل':{'postal':(81411,81999),'dists':[('المنتزه','شارع الملك فيصل'),('العزيزية','طريق الأمير سلطان')]},
+FALLBACK_CITY_DATA = {
+    'الرياض': {'postal': (11411, 13999),
+               'dists': [('العليا', 'شارع العليا'), ('النخيل', 'شارع الأمير محمد')]},
+    'جدة': {'postal': (21411, 23999),
+             'dists': [('الحمراء', 'شارع فلسطين'), ('الروضة', 'شارع الأمير سلطان')]},
 }
-PREFIXES = ['050','051','053','054','055','056','057','058','059']
+PREFIXES = ['050', '053', '054', '055', '056', '057', '058', '059']
 
-def pick_city():
-    cities = NAMES.get('cities',[{'name':'الرياض','weight':1}])
-    return random.choices(cities,weights=[c.get('weight',1) for c in cities],k=1)[0]['name']
+TRENDING_BRANDS = [
+    'ديور', 'شانيل', 'توم فورد', 'لطافة', 'أرماني', 'بربري',
+    'كارولينا', 'لانكوم', 'فرساتشي', 'جوتشي', 'أمواج', 'كريد',
+]
+TREND_LOW = [b.lower() for b in TRENDING_BRANDS]
 
-def make_address(city):
-    cd = CITY_DATA.get(city,{'postal':(11411,13999),'dists':[('المركز','شارع العام')]})
+
+def _fallback_pick_city():
+    """اختيار مدينة (fallback)"""
+    cities = NAMES.get('cities', [{'name': 'الرياض', 'weight': 1}])
+    return random.choices(cities, weights=[c.get('weight', 1) for c in cities], k=1)[0]['name']
+
+
+def _fallback_make_address(city):
+    """توليد عنوان (fallback)"""
+    cd = FALLBACK_CITY_DATA.get(city, {'postal': (11411, 13999),
+                                        'dists': [('المركز', 'شارع العام')]})
     dist, street = random.choice(cd['dists'])
-    b = str(random.randint(1000,9999))
-    p = str(random.randint(*cd['postal']))
-    return f'{b} {street}، حي {dist}، {city} {p}'
+    return f'{random.randint(1000, 9999)} {street}، حي {dist}، {city} {random.randint(*cd["postal"])}'
 
-def make_phone():
-    return random.choice(PREFIXES)+''.join([str(random.randint(0,9)) for _ in range(7)])
 
-def pick_products(arch):
-    pool = [p for p in PRODUCTS if p['g'] in arch['prefers'] and arch['price'][0]<=p['price']<=arch['price'][1]]
-    if len(pool)<3: pool = [p for p in PRODUCTS if p['g'] in arch['prefers']]
-    if len(pool)<3: pool = PRODUCTS[:]
+def _fallback_gen_persona():
+    """توليد شخصية بالنظام القديم"""
+    arch = random.choice(FALLBACK_ARCHETYPES)
+    age = random.randint(*arch['age'])
+    city = _fallback_pick_city()
+    key = 'male' if arch['g'] == 'male' else 'female'
+    name = random.choice(NAMES.get(key, ['مستخدم'])) + ' ' + \
+           random.choice(NAMES.get('family_names', ['السعودي']))
+    phone = random.choice(PREFIXES) + ''.join([str(random.randint(0, 9)) for _ in range(7)])
+    address = _fallback_make_address(city)
+    pool = [p for p in PRODUCTS if p['g'] in arch['prefers']
+            and arch['price'][0] <= p['price'] <= arch['price'][1]]
+    if len(pool) < 3:
+        pool = [p for p in PRODUCTS if p['g'] in arch['prefers']]
+    if len(pool) < 3:
+        pool = PRODUCTS[:]
     weights = []
     for p in pool:
-        nm = (p.get('brand','')+p.get('name','')).lower()
+        nm = (p.get('brand', '') + p.get('name', '')).lower()
         weights.append(3.0 if any(t in nm for t in TREND_LOW) else 1.0)
     count = min(random.randint(*arch['count']), len(pool))
     sel, pc, wc = [], list(pool), list(weights)
     for _ in range(count):
-        if not pc: break
-        idx = random.choices(range(len(pc)),weights=wc,k=1)[0]
-        sel.append(pc.pop(idx)); wc.pop(idx)
-    return sel
+        if not pc:
+            break
+        idx = random.choices(range(len(pc)), weights=wc, k=1)[0]
+        sel.append(pc.pop(idx))
+        wc.pop(idx)
+    persona = {
+        'name': name, 'city': city, 'gender': arch['g'], 'age': age,
+        'label': arch['label'], 'emoji': arch['emoji'], 'archId': arch['id'],
+        'address': address, 'phone': phone,
+        # أبعاد فارغة (fallback)
+        'mood': 'عادي', 'expertise': 'متوسط', 'writing_style': 'عادي',
+        'dialect': 'najdi', 'dialect_name': 'نجدية',
+        'mention_product': True, 'use_emoji': False, 'has_typo': False,
+    }
+    return persona, sel
+
+
+def gen_persona_full():
+    """توليد شخصية كاملة — محرك جديد أو قديم"""
+    if USE_NEW_PERSONAS:
+        persona = generate_persona()
+        # اختيار المنتجات بناءً على archetype
+        arch_match = None
+        for a in ARCHETYPES:
+            if a['id'] == persona.get('archId'):
+                arch_match = a
+                break
+        if arch_match is None:
+            arch_match = random.choice(ARCHETYPES)
+        pool = [p for p in PRODUCTS if p['g'] in arch_match['prefers']
+                and arch_match['price'][0] <= p['price'] <= arch_match['price'][1]]
+        if len(pool) < 3:
+            pool = [p for p in PRODUCTS if p['g'] in arch_match['prefers']]
+        if len(pool) < 3:
+            pool = PRODUCTS[:]
+        weights = []
+        for p in pool:
+            nm = (p.get('brand', '') + p.get('name', '')).lower()
+            weights.append(3.0 if any(t in nm for t in TREND_LOW) else 1.0)
+        count = min(random.randint(*arch_match['count']), len(pool))
+        sel, pc, wc = [], list(pool), list(weights)
+        for _ in range(count):
+            if not pc:
+                break
+            idx = random.choices(range(len(pc)), weights=wc, k=1)[0]
+            sel.append(pc.pop(idx))
+            wc.pop(idx)
+        # تحويل العنوان لنص إذا كان dict
+        addr = persona.get('address', '')
+        if isinstance(addr, dict):
+            addr = addr.get('full', str(addr))
+        persona['address'] = addr
+        return persona, sel
+    else:
+        return _fallback_gen_persona()
+
+
+# ═══════════════════════════════════════════════════════════
+#  توليد التقييمات بالذكاء الاصطناعي
+# ═══════════════════════════════════════════════════════════
 
 def gen_reviews(persona, perfumes):
-    pf_list = '\n'.join([f'{i+1}. {p["name"]} ({p["brand"]}, {p["price"]} ر.س)' for i,p in enumerate(perfumes)])
+    """توليد تقييمات المنتجات — برومبت متقدم أو قديم"""
     used = get_used_texts()
     ub = ''
     if used:
-        ub = '\n\n⛔ لا تكرر أي صياغة مشابهة لهذه:\n'+'\n'.join([f'- {t}' for t in used[-30:]])
-    prompt = f"""أنت عميل سعودي حقيقي يكتب تقييمات على متجر عطور إلكتروني.
+        ub = '\n'.join([f'- {t}' for t in used[-30:]])
+
+    if USE_NEW_PERSONAS:
+        # === برومبت متقدم لكل منتج ===
+        all_reviews = []
+        for pf in perfumes:
+            review_params = generate_review_params(persona)
+            prompt = build_master_prompt(
+                persona=persona,
+                product_name=f"{pf['name']} ({pf['brand']}, {pf['price']} ر.س)",
+                review_params=review_params,
+                used_texts_block=ub,
+            )
+            result = ai_call(prompt, 400)
+            if result:
+                try:
+                    rv = json.loads(clean_json(result))
+                    rv['product'] = pf['name']
+                    rv['brand'] = pf['brand']
+                    rv['price'] = pf['price']
+                    all_reviews.append(rv)
+                    continue
+                except Exception:
+                    pass
+            # fallback لهذا المنتج
+            all_reviews.append({
+                'product': pf['name'], 'brand': pf['brand'],
+                'price': pf['price'], 'rating': 5, 'text': 'ممتاز',
+            })
+        archive_batch(all_reviews, persona.get('name', ''))
+        return all_reviews
+    else:
+        # === برومبت قديم (batch) ===
+        pf_list = '\n'.join([f'{i+1}. {p["name"]} ({p["brand"]}, {p["price"]} ر.س)'
+                             for i, p in enumerate(perfumes)])
+        prompt = f"""أنت عميل سعودي حقيقي يكتب تقييمات على متجر عطور إلكتروني.
 
 بيانات الشخصية:
 - {persona['label']}، {'رجل' if persona['gender']=='male' else 'امرأة'}، {persona['age']} سنة، من {persona['city']}
@@ -172,138 +380,677 @@ def gen_reviews(persona, perfumes):
 {pf_list}
 
 ## قواعد كتابة التقييم:
-1. الطول: من 3 كلمات إلى 25 كلمة فقط. بعضها قصير مثل "ممتاز" أو "روعة"
+1. الطول: من 3 كلمات إلى 25 كلمة فقط
 2. لا تذكر اسم العطر في كل تقييم
 3. لا تضع إيموجي إلا نادراً
 4. لا تبدأ كل تقييم بنفس الطريقة
-5. لهجة سعودية عامية حسب المدينة (نجدية/حجازية/شرقية)
-6. نوّع بين: تقييم قصير، توصيل، تغليف، ثبات، ريحة، هدية، مقارنة، تكرار شراء
+5. لهجة سعودية عامية حسب المدينة
+6. نوّع بين: تقييم قصير، توصيل، تغليف، ثبات، ريحة، هدية
 7. التقييم 5 نجوم غالباً، أحياناً 4، نادراً 3
-{ub}
+
+⛔ لا تكرر أي صياغة مشابهة لهذه:
+{ub if ub else '(لا يوجد سابق)'}
 
 أرجع JSON فقط بدون أي نص:
 [{{"product":"اسم العطر","rating":5,"text":"التقييم"}}]"""
 
-    result = ai_call(prompt, 2000)
-    if not result:
-        return [{'product':p['name'],'rating':5,'text':'ممتاز','brand':p['brand'],'price':p['price']} for p in perfumes]
-    try:
-        reviews = json.loads(clean_json(result))[:len(perfumes)]
-        for i,rv in enumerate(reviews):
-            if i<len(perfumes):
-                rv['product']=perfumes[i]['name']; rv['brand']=perfumes[i]['brand']; rv['price']=perfumes[i]['price']
-        archive_batch(reviews, persona.get('name',''))
-        return reviews
-    except:
-        return [{'product':p['name'],'rating':5,'text':'ممتاز','brand':p['brand'],'price':p['price']} for p in perfumes]
+        result = ai_call(prompt, 2000)
+        if not result:
+            return [{'product': p['name'], 'rating': 5, 'text': 'ممتاز',
+                     'brand': p['brand'], 'price': p['price']} for p in perfumes]
+        try:
+            reviews = json.loads(clean_json(result))[:len(perfumes)]
+            for i, rv in enumerate(reviews):
+                if i < len(perfumes):
+                    rv['product'] = perfumes[i]['name']
+                    rv['brand'] = perfumes[i]['brand']
+                    rv['price'] = perfumes[i]['price']
+            archive_batch(reviews, persona.get('name', ''))
+            return reviews
+        except Exception:
+            return [{'product': p['name'], 'rating': 5, 'text': 'ممتاز',
+                     'brand': p['brand'], 'price': p['price']} for p in perfumes]
+
 
 def gen_store_review(persona):
+    """توليد تقييم للمتجر"""
     prompt = f"""اكتب تقييم قصير (10-20 كلمة) لمتجر "مهووس للعطور" بلهجة سعودية عامية.
 العميل: {persona['label']}، عمره {persona['age']}، من {persona['city']}.
 أرجع JSON فقط: {{"rating":5,"text":"..."}}"""
     result = ai_call(prompt, 200)
-    if not result: return {'rating':5,'text':'متجر ممتاز والعطور أصلية'}
-    try: return json.loads(clean_json(result))
-    except: return {'rating':5,'text':'متجر ممتاز والعطور أصلية'}
+    if not result:
+        return {'rating': 5, 'text': 'متجر ممتاز والعطور أصلية'}
+    try:
+        return json.loads(clean_json(result))
+    except Exception:
+        return {'rating': 5, 'text': 'متجر ممتاز والعطور أصلية'}
 
-def gen_persona():
-    arch = random.choice(ARCHETYPES)
-    age = random.randint(*arch['age'])
-    city = pick_city()
-    key = 'male' if arch['g']=='male' else 'female'
-    name = random.choice(NAMES.get(key,['مستخدم']))+' '+random.choice(NAMES.get('family_names',['السعودي']))
-    perfumes = pick_products(arch)
-    persona = {'name':name,'city':city,'gender':arch['g'],'age':age,'label':arch['label'],
-               'emoji':arch['emoji'],'archId':arch['id'],'address':make_address(city),'phone':make_phone()}
-    return persona, perfumes, arch
 
-# ═══════════ CSS ═══════════
+# ═══════════════════════════════════════════════════════════
+#  CSS — الثيم الداكن مع ذهبي
+# ═══════════════════════════════════════════════════════════
+
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap');
+
+/* === أساسيات === */
 * { font-family: 'Tajawal', sans-serif !important; }
 .main { direction: rtl; text-align: right; }
-h1 { background: linear-gradient(135deg, #ddb562, #f4e4b0); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-align: center; }
-.persona-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(221,181,98,0.2); border-radius: 12px; padding: 16px; margin: 10px 0; }
-.review-box { background: rgba(221,181,98,0.08); border-right: 3px solid #ddb562; padding: 10px 14px; margin: 6px 0; border-radius: 0 8px 8px 0; }
+h1 {
+    background: linear-gradient(135deg, #ddb562, #f4e4b0);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-align: center;
+    font-weight: 800;
+    font-size: 2.2rem;
+}
+
+/* === التبويبات === */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0;
+    direction: rtl;
+    justify-content: center;
+    border-bottom: 2px solid rgba(221,181,98,0.15);
+}
+.stTabs [data-baseweb="tab"] {
+    font-family: 'Tajawal', sans-serif !important;
+    font-size: 16px;
+    font-weight: 700;
+    color: #9a9080;
+    padding: 12px 28px;
+    border-radius: 10px 10px 0 0;
+    transition: all 0.3s;
+}
+.stTabs [aria-selected="true"] {
+    color: #ddb562 !important;
+    background: rgba(221,181,98,0.08);
+    border-bottom: 3px solid #ddb562;
+}
+
+/* === بطاقة الشخصية === */
+.persona-card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(221,181,98,0.2);
+    border-radius: 14px;
+    padding: 18px 20px;
+    margin: 12px 0;
+}
+.persona-card h3 {
+    color: #ddb562;
+    margin: 0 0 8px 0;
+    font-size: 1.3rem;
+}
+
+/* === صندوق التقييم === */
+.review-box {
+    background: rgba(221,181,98,0.08);
+    border-right: 3px solid #ddb562;
+    padding: 10px 14px;
+    margin: 6px 0;
+    border-radius: 0 8px 8px 0;
+}
 .stars { color: #ddb562; font-size: 14px; }
-.product-tag { display: inline-block; background: rgba(221,181,98,0.15); color: #ddb562; padding: 2px 10px; border-radius: 20px; font-size: 13px; margin: 2px; }
+
+/* === وسوم المنتجات === */
+.product-tag {
+    display: inline-block;
+    background: rgba(221,181,98,0.15);
+    color: #ddb562;
+    padding: 3px 12px;
+    border-radius: 20px;
+    font-size: 13px;
+    margin: 3px;
+}
+
+/* === الأبعاد (Badges) === */
+.dim-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    margin: 2px;
+    font-weight: 500;
+}
+.dim-mood       { background: rgba(147,112,219,0.2); color: #b79ae0; }
+.dim-expertise  { background: rgba(70,180,130,0.2);  color: #5ec49e; }
+.dim-style      { background: rgba(70,150,220,0.2);  color: #6ab0e8; }
+.dim-dialect    { background: rgba(221,181,98,0.2);   color: #ddb562; }
+.dim-mention    { background: rgba(220,120,120,0.15); color: #e09090; }
+.dim-emoji      { background: rgba(255,200,60,0.15);  color: #f0c830; }
+.dim-typo       { background: rgba(180,180,180,0.15); color: #b0b0b0; }
+
+/* === معلومات === */
 .info-row { color: #9a9080; font-size: 14px; margin: 4px 0; }
-.store-review { background: rgba(221,181,98,0.12); border: 1px solid rgba(221,181,98,0.3); border-radius: 10px; padding: 12px; margin: 8px 0; }
-.copy-text { background: rgba(0,0,0,0.3); padding: 6px 10px; border-radius: 6px; font-size: 13px; margin: 4px 0; direction: ltr; }
+
+/* === تقييم المتجر === */
+.store-review {
+    background: rgba(221,181,98,0.12);
+    border: 1px solid rgba(221,181,98,0.3);
+    border-radius: 10px;
+    padding: 12px;
+    margin: 8px 0;
+}
+
+/* === لوحة الاستخبارات === */
+.intel-card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(221,181,98,0.15);
+    border-radius: 12px;
+    padding: 16px;
+    margin: 8px 0;
+}
+.intel-metric {
+    text-align: center;
+    padding: 14px;
+    background: rgba(221,181,98,0.06);
+    border-radius: 10px;
+    border: 1px solid rgba(221,181,98,0.12);
+}
+.intel-metric .value {
+    font-size: 2rem;
+    font-weight: 800;
+    color: #ddb562;
+    display: block;
+}
+.intel-metric .label {
+    font-size: 13px;
+    color: #9a9080;
+    margin-top: 2px;
+}
+.priority-row {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(221,181,98,0.1);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin: 6px 0;
+}
+.priority-name {
+    color: #ddb562;
+    font-weight: 700;
+    font-size: 15px;
+}
+.rank-badge {
+    display: inline-block;
+    background: rgba(221,181,98,0.2);
+    color: #ddb562;
+    padding: 2px 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 700;
+}
+.rank-badge.danger { background: rgba(220,80,80,0.2); color: #e07070; }
+.rank-badge.success { background: rgba(70,180,130,0.2); color: #5ec49e; }
+
+/* === قواعد السلامة === */
+.safety-rule {
+    background: rgba(70,180,130,0.06);
+    border-right: 3px solid #5ec49e;
+    padding: 8px 14px;
+    margin: 4px 0;
+    border-radius: 0 8px 8px 0;
+    font-size: 14px;
+    color: #b0c8b8;
+}
+
+/* === إعدادات === */
+.engine-status {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    margin: 3px;
+    font-weight: 600;
+}
+.engine-on  { background: rgba(70,180,130,0.2); color: #5ec49e; }
+.engine-off { background: rgba(220,80,80,0.15); color: #e07070; }
+
+/* === نص النسخ === */
+.copy-text {
+    background: rgba(0,0,0,0.3);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    margin: 4px 0;
+    direction: ltr;
+}
+
+/* === sub header === */
+.sub-header {
+    text-align: center;
+    color: #9a9080;
+    font-size: 14px;
+    margin-bottom: 18px;
+}
 </style>
 """, unsafe_allow_html=True)
 
-# ═══════════ الواجهة ═══════════
+# ═══════════════════════════════════════════════════════════
+#  العنوان الرئيسي
+# ═══════════════════════════════════════════════════════════
+
+arc_count = len(load_archive().get('reviews', []))
 st.markdown("<h1>🌸 مساعدي في شراء العطور</h1>", unsafe_allow_html=True)
-st.markdown(f"<p style='text-align:center;color:#9a9080;font-size:14px'>🧠 ذكاء اصطناعي • {len(PRODUCTS):,} عطر • لهجات سعودية • أرشيف ذكي ({len(load_archive().get('reviews',[]))} تقييم)</p>", unsafe_allow_html=True)
+st.markdown(
+    f"<p class='sub-header'>🧠 ذكاء اصطناعي • {len(PRODUCTS):,} عطر "
+    f"• لهجات سعودية • أرشيف ذكي ({arc_count} تقييم)</p>",
+    unsafe_allow_html=True,
+)
 
-col1, col2, col3 = st.columns(3)
-with col1: st.link_button("📧 بريد مؤقت", "https://boomlify.com/ar/dashboard")
-with col2: st.link_button("🛒 مهووس", "https://mahwous.com")
-with col3: st.link_button("📦 محلي", "http://localhost:5000")
+# ═══════════════════════════════════════════════════════════
+#  التبويبات الثلاثة
+# ═══════════════════════════════════════════════════════════
 
-st.divider()
-count = st.selectbox("عدد الشخصيات:", [1,3,5,10], index=0)
+tab1, tab2, tab3 = st.tabs([
+    "✨ مولد الشخصيات",
+    "📊 استخبارات محلي",
+    "⚙️ الإعدادات",
+])
 
-if st.button("✨ ولّد شخصيات جديدة", type="primary", use_container_width=True):
-    results = []
-    progress = st.progress(0, text="جاري التوليد بالذكاء الاصطناعي...")
-    for i in range(count):
-        progress.progress((i)/count, text=f"🧠 شخصية {i+1} من {count}...")
-        persona, perfumes, arch = gen_persona()
-        reviews = gen_reviews(persona, perfumes)
-        store = gen_store_review(persona)
-        results.append({'persona':persona,'perfumes':perfumes,'reviews':reviews,'store':store})
-    progress.progress(1.0, text=f"✅ {count} شخصية جاهزة!")
-    st.session_state['results'] = results
+# ═══════════════════════════════════════════════════════════
+#  Tab 1: مولد الشخصيات
+# ═══════════════════════════════════════════════════════════
 
-if 'results' in st.session_state:
-    for idx, r in enumerate(st.session_state['results']):
-        p = r['persona']
-        with st.container():
-            st.markdown(f"""<div class="persona-card">
+with tab1:
+    # أزرار سريعة
+    lnk1, lnk2, lnk3 = st.columns(3)
+    with lnk1:
+        st.link_button("📧 بريد مؤقت", "https://boomlify.com/ar/dashboard")
+    with lnk2:
+        st.link_button("🛒 مهووس", "https://mahwous.com")
+    with lnk3:
+        st.link_button("📦 محلي", "http://localhost:5000")
+
+    st.divider()
+
+    count = st.selectbox("عدد الشخصيات:", [1, 3, 5, 10], index=0, key="persona_count")
+
+    if st.button("✨ ولّد شخصيات جديدة", type="primary", use_container_width=True):
+        results = []
+        progress = st.progress(0, text="جاري التوليد بالذكاء الاصطناعي...")
+        for i in range(count):
+            progress.progress(i / count, text=f"🧠 شخصية {i + 1} من {count}...")
+            persona, perfumes = gen_persona_full()
+            reviews = gen_reviews(persona, perfumes)
+            store = gen_store_review(persona)
+            results.append({
+                'persona': persona,
+                'perfumes': perfumes,
+                'reviews': reviews,
+                'store': store,
+            })
+        progress.progress(1.0, text=f"✅ {count} شخصية جاهزة!")
+        st.session_state['results'] = results
+
+    # === عرض النتائج ===
+    if 'results' in st.session_state:
+        for idx, r in enumerate(st.session_state['results']):
+            p = r['persona']
+            with st.container():
+                # --- بطاقة الشخصية ---
+                st.markdown(f"""<div class="persona-card">
 <h3>{p['emoji']} {p['name']}</h3>
 <div class="info-row">📍 {p['city']} • {p['label']} • {p['age']} سنة</div>
 <div class="info-row">📱 {p['phone']}</div>
 <div class="info-row">🏠 {p['address']}</div>
 </div>""", unsafe_allow_html=True)
 
-            # نسخ البيانات
-            copy_data = f"{p['name']}\n{p['phone']}\n{p['city']}\n{p['address']}"
-            st.code(copy_data, language=None)
+                # --- الأبعاد السبعة (badges) ---
+                mood = p.get('mood', '')
+                expertise = p.get('expertise', '')
+                w_style = p.get('writing_style', '')
+                dialect_n = p.get('dialect_name', '')
+                mention = '✓ ذكر المنتج' if p.get('mention_product') else '✗ بدون ذكر'
+                emoji_flag = '✓ إيموجي' if p.get('use_emoji') else '✗ بدون إيموجي'
+                typo_flag = '✓ أخطاء' if p.get('has_typo') else '✗ بدون أخطاء'
 
-            # المنتجات
-            st.markdown(f"**🧴 المنتجات ({len(r['perfumes'])})**")
-            for pf in r['perfumes']:
-                g_icon = '👨' if pf['g']=='رجالي' else '👩' if pf['g']=='نسائي' else '👤'
-                st.markdown(f"<span class='product-tag'>{g_icon} {pf['name']} — {pf['price']} ر.س</span>", unsafe_allow_html=True)
+                st.markdown(f"""
+<span class="dim-badge dim-mood">🎭 {mood}</span>
+<span class="dim-badge dim-expertise">📈 {expertise}</span>
+<span class="dim-badge dim-style">✍️ {w_style}</span>
+<span class="dim-badge dim-dialect">🗣️ {dialect_n}</span>
+<span class="dim-badge dim-mention">📦 {mention}</span>
+<span class="dim-badge dim-emoji">😊 {emoji_flag}</span>
+<span class="dim-badge dim-typo">✏️ {typo_flag}</span>
+""", unsafe_allow_html=True)
 
-            # التقييمات
-            st.markdown("**💬 التقييمات**")
-            for rv in r['reviews']:
-                stars = '★' * rv.get('rating',5) + '☆' * (5-rv.get('rating',5))
-                st.markdown(f"""<div class="review-box">
-<div style="font-size:13px;color:#9a9080">{rv.get('product','')}</div>
+                # --- نسخ البيانات ---
+                copy_data = f"{p['name']}\n{p['phone']}\n{p['city']}\n{p['address']}"
+                st.code(copy_data, language=None)
+
+                # --- المنتجات ---
+                st.markdown(f"**🧴 المنتجات ({len(r['perfumes'])})**")
+                for pf in r['perfumes']:
+                    g_icon = '👨' if pf['g'] == 'رجالي' else ('👩' if pf['g'] == 'نسائي' else '👤')
+                    st.markdown(
+                        f"<span class='product-tag'>{g_icon} {pf['name']} — {pf['price']} ر.س</span>",
+                        unsafe_allow_html=True,
+                    )
+
+                # --- التقييمات ---
+                st.markdown("**💬 التقييمات**")
+                for rv in r['reviews']:
+                    rating = rv.get('rating', 5)
+                    stars = '★' * rating + '☆' * (5 - rating)
+                    st.markdown(f"""<div class="review-box">
+<div style="font-size:13px;color:#9a9080">{rv.get('product', '')}</div>
 <div class="stars">{stars}</div>
-<div>{rv.get('text','')}</div>
+<div>{rv.get('text', '')}</div>
 </div>""", unsafe_allow_html=True)
 
-            # تقييم المتجر
-            s = r['store']
-            s_stars = '★' * s.get('rating',5)
-            st.markdown(f"""<div class="store-review">
+                # --- تقييم المتجر ---
+                s = r['store']
+                s_stars = '★' * s.get('rating', 5)
+                st.markdown(f"""<div class="store-review">
 <b>🏪 تقييم المتجر</b><br>
-<span class="stars">{s_stars}</span> {s.get('text','')}
+<span class="stars">{s_stars}</span> {s.get('text', '')}
 </div>""", unsafe_allow_html=True)
 
-            st.divider()
+                st.divider()
+
+
+# ═══════════════════════════════════════════════════════════
+#  Tab 2: استخبارات محلي
+# ═══════════════════════════════════════════════════════════
+
+with tab2:
+    if not USE_MAHALLI:
+        st.warning("⚠️ محرك استخبارات محلي (mahalli_intel.py) غير متاح. تأكد من وجود الملف.")
+        st.info("يتطلب هذا التبويب ملف `mahalli_intel.py` في نفس المجلد.")
+    else:
+        st.markdown("### 📊 لوحة استخبارات محلي")
+        st.markdown("<p style='color:#9a9080;font-size:13px'>بيانات تنافسية مباشرة من Algolia — ترتيب ومقارنة وخطة يومية</p>",
+                    unsafe_allow_html=True)
+
+        # --- ملخص يومي ---
+        try:
+            summary = get_dashboard_summary()
+            m1, m2, m3, m4 = st.columns(4)
+            with m1:
+                st.markdown(f"""<div class="intel-metric">
+<span class="value">{summary.get('total_products', 0)}</span>
+<span class="label">إجمالي المنتجات</span>
+</div>""", unsafe_allow_html=True)
+            with m2:
+                st.markdown(f"""<div class="intel-metric">
+<span class="value">{summary.get('active_products', 0)}</span>
+<span class="label">منتجات نشطة</span>
+</div>""", unsafe_allow_html=True)
+            with m3:
+                st.markdown(f"""<div class="intel-metric">
+<span class="value">{summary.get('daily_reviews_needed', 0)}</span>
+<span class="label">تقييمات مطلوبة اليوم</span>
+</div>""", unsafe_allow_html=True)
+            with m4:
+                cache_age = summary.get('cache_age_minutes', -1)
+                age_txt = f"{cache_age} دق" if cache_age >= 0 else "—"
+                st.markdown(f"""<div class="intel-metric">
+<span class="value">{age_txt}</span>
+<span class="label">عمر الكاش</span>
+</div>""", unsafe_allow_html=True)
+        except Exception as e:
+            st.error(f"خطأ في تحميل الملخص: {e}")
+
+        # --- زر التحديث ---
+        st.markdown("")
+        if st.button("🔄 تحديث الآن", use_container_width=True, key="refresh_intel"):
+            with st.spinner("جاري تحديث البيانات من Algolia..."):
+                try:
+                    result = refresh_all_data()
+                    st.success(
+                        f"✅ تم التحديث — {result.get('products_count', 0)} منتج، "
+                        f"{result.get('rankings_count', 0)} ترتيب"
+                    )
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"خطأ في التحديث: {e}")
+
+        st.divider()
+
+        # --- قائمة الأولويات ---
+        st.markdown("### 🎯 قائمة الأولويات")
+        try:
+            plan = generate_daily_plan()
+            products_plan = plan.get('products', [])
+            if not products_plan:
+                st.info("🎉 لا توجد منتجات تحتاج تقييمات حالياً — ممتاز!")
+            else:
+                st.markdown(
+                    f"<p style='color:#9a9080;font-size:13px'>📅 خطة اليوم: "
+                    f"{plan.get('total_reviews', 0)} تقييم على {len(products_plan)} منتج</p>",
+                    unsafe_allow_html=True,
+                )
+                for item in products_plan:
+                    name = item.get('name', 'بدون اسم')
+                    our_w = item.get('our_weight', 0)
+                    target_w = item.get('target_weight', 1)
+                    our_count = item.get('our_count', 0)
+                    gap = item.get('gap', 0)
+                    quota = item.get('quota', 0)
+                    s5 = item.get('stars_5', 0)
+                    s4 = item.get('stars_4', 0)
+                    progress_pct = min(our_w / target_w, 1.0) if target_w > 0 else 0
+
+                    # المنافس الأول
+                    top_comp = item.get('top_competitor')
+                    comp_name = ''
+                    if top_comp:
+                        comp_name = top_comp.get('store_name', top_comp.get('name_ar', ''))[:25]
+
+                    rank_class = 'danger' if gap > 50 else ('success' if gap <= 0 else '')
+
+                    st.markdown(f"""<div class="priority-row">
+<div class="priority-name">{name}</div>
+<div class="info-row">
+    تقييماتنا: <b>{our_count}</b> •
+    الوزن: <b>{our_w}</b> / <b>{target_w}</b> •
+    الفجوة: <span class="rank-badge {rank_class}">{gap}</span>
+</div>
+<div class="info-row">
+    المنافس الأول: {comp_name if comp_name else '—'} •
+    الحصة اليومية: <b>{quota}</b> ({s5}×⭐5 + {s4}×⭐4)
+</div>
+</div>""", unsafe_allow_html=True)
+
+                    # شريط التقدم
+                    st.progress(progress_pct,
+                                text=f"{int(progress_pct * 100)}% من الهدف")
+
+        except Exception as e:
+            st.error(f"خطأ في تحميل الأولويات: {e}")
+
+        st.divider()
+
+        # --- فاحص الترتيب ---
+        st.markdown("### 🔍 فاحص ترتيب البحث")
+        check_col1, check_col2 = st.columns([3, 1])
+        with check_col1:
+            search_query = st.text_input(
+                "كلمة البحث:", placeholder="مثال: ديور سوفاج", key="rank_query",
+            )
+        with check_col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            check_btn = st.button("🔍 فحص", key="check_rank")
+
+        if check_btn and search_query:
+            with st.spinner(f"جاري البحث عن «{search_query}»..."):
+                try:
+                    rank, product = get_our_rank(search_query, use_cache=False)
+                    if rank:
+                        prod_name = product.get('name_ar', '') if product else ''
+                        rc = 'success' if rank <= 5 else ('danger' if rank > 15 else '')
+                        st.markdown(f"""<div class="intel-card">
+<b>🔍 نتيجة البحث عن: «{search_query}»</b><br>
+ترتيبنا: <span class="rank-badge {rc}">#{rank}</span><br>
+المنتج: {prod_name}
+</div>""", unsafe_allow_html=True)
+                    else:
+                        st.warning(f"❌ لم نظهر في أول 50 نتيجة لـ «{search_query}»")
+                except Exception as e:
+                    st.error(f"خطأ: {e}")
+
+        # --- كلمات البحث الشائعة ---
+        with st.expander("📋 كلمات البحث الشائعة"):
+            try:
+                for kw in TOP_SEARCHES:
+                    rank, product = get_our_rank(kw)
+                    if rank:
+                        rc = 'success' if rank <= 5 else ('danger' if rank > 15 else '')
+                        st.markdown(
+                            f"<span class='rank-badge {rc}'>#{rank}</span> {kw}",
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            f"<span class='rank-badge danger'>—</span> {kw}",
+                            unsafe_allow_html=True,
+                        )
+            except Exception as e:
+                st.error(f"خطأ: {e}")
+
+        st.divider()
+
+        # --- قواعد السلامة ---
+        st.markdown("### 🛡️ قواعد السلامة")
+        try:
+            rules = SAFETY_RULES
+            rules_display = {
+                'max_reviews_per_product_per_day': ('أقصى تقييمات لكل منتج يومياً', '📝'),
+                'max_products_per_account_per_day': ('أقصى منتجات لكل حساب يومياً', '📦'),
+                'min_days_after_purchase': ('أقل أيام بعد الشراء', '⏳'),
+                'max_days_after_purchase': ('أقصى أيام بعد الشراء', '📅'),
+                'four_star_percentage': ('نسبة تقييمات 4 نجوم (%)', '⭐'),
+                'num_accounts': ('عدد الحسابات', '👤'),
+            }
+            for key, (label, icon) in rules_display.items():
+                val = rules.get(key, '—')
+                st.markdown(
+                    f'<div class="safety-rule">{icon} {label}: <b>{val}</b></div>',
+                    unsafe_allow_html=True,
+                )
+        except Exception as e:
+            st.error(f"خطأ: {e}")
+
+
+# ═══════════════════════════════════════════════════════════
+#  Tab 3: الإعدادات
+# ═══════════════════════════════════════════════════════════
+
+with tab3:
+    st.markdown("### ⚙️ الإعدادات والأدوات")
+
+    # --- إحصائيات الأرشيف ---
+    st.markdown("#### 📦 الأرشيف")
+    arc = load_archive()
+    arc_reviews = arc.get('reviews', [])
+    arc_len = len(arc_reviews)
+    st.markdown(f"""<div class="intel-card">
+<b>إجمالي التقييمات المحفوظة:</b> {arc_len} / {MAX_ARCHIVE}<br>
+<span style="color:#9a9080;font-size:13px">يحتفظ النظام بآخر {MAX_ARCHIVE} تقييم (FIFO)</span>
+</div>""", unsafe_allow_html=True)
+
+    if arc_len > 0:
+        st.progress(min(arc_len / MAX_ARCHIVE, 1.0),
+                    text=f"{arc_len}/{MAX_ARCHIVE} تقييم")
 
     # مسح الأرشيف
-    with st.expander("⚙️ إعدادات"):
-        arc = load_archive()
-        st.write(f"📦 الأرشيف: {len(arc.get('reviews',[]))} تقييم محفوظ")
-        if st.button("🗑️ مسح الأرشيف"):
-            save_archive({'reviews':[]})
-            st.success("تم مسح الأرشيف")
-            st.rerun()
+    if st.button("🗑️ مسح الأرشيف", key="clear_archive"):
+        save_archive({'reviews': []})
+        st.success("✅ تم مسح الأرشيف بنجاح")
+        st.rerun()
+
+    st.divider()
+
+    # --- تصدير CSV ---
+    st.markdown("#### 📥 تصدير CSV")
+    st.markdown("<p style='color:#9a9080;font-size:13px'>تصدير كل الشخصيات والتقييمات المولّدة في الجلسة الحالية</p>",
+                unsafe_allow_html=True)
+
+    if 'results' in st.session_state and st.session_state['results']:
+        results = st.session_state['results']
+        # بناء CSV في الذاكرة
+        output = io.StringIO()
+        writer = csv.writer(output, quoting=csv.QUOTE_ALL)
+        # رأس الجدول
+        writer.writerow([
+            'اسم الشخصية', 'المدينة', 'الهاتف', 'العنوان', 'العمر',
+            'النوع', 'النمط', 'المزاج', 'الخبرة', 'أسلوب الكتابة',
+            'اللهجة', 'ذكر المنتج', 'إيموجي', 'أخطاء',
+            'اسم المنتج', 'البراند', 'السعر', 'التقييم (نجوم)', 'نص التقييم',
+            'تقييم المتجر (نجوم)', 'نص تقييم المتجر',
+        ])
+        for r in results:
+            p = r['persona']
+            store = r.get('store', {})
+            for rv in r['reviews']:
+                writer.writerow([
+                    p.get('name', ''), p.get('city', ''), p.get('phone', ''),
+                    p.get('address', ''), p.get('age', ''),
+                    'ذكر' if p.get('gender') == 'male' else 'أنثى',
+                    p.get('label', ''), p.get('mood', ''), p.get('expertise', ''),
+                    p.get('writing_style', ''), p.get('dialect_name', ''),
+                    'نعم' if p.get('mention_product') else 'لا',
+                    'نعم' if p.get('use_emoji') else 'لا',
+                    'نعم' if p.get('has_typo') else 'لا',
+                    rv.get('product', ''), rv.get('brand', ''), rv.get('price', ''),
+                    rv.get('rating', 5), rv.get('text', ''),
+                    store.get('rating', 5), store.get('text', ''),
+                ])
+        csv_data = output.getvalue()
+
+        st.download_button(
+            label="📥 تحميل CSV",
+            data=csv_data.encode('utf-8-sig'),
+            file_name=f"personas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+        st.markdown(
+            f"<p style='color:#9a9080;font-size:13px'>"
+            f"📊 {len(results)} شخصية — "
+            f"{sum(len(r['reviews']) for r in results)} تقييم جاهز للتصدير</p>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.info("💡 لا توجد شخصيات مولّدة في الجلسة الحالية. ولّد شخصيات أولاً من تبويب «✨ مولد الشخصيات».")
+
+    st.divider()
+
+    # --- حالة المحركات ---
+    st.markdown("#### 🔧 حالة المحركات")
+    engines = {
+        'personas_engine': USE_NEW_PERSONAS,
+        'dialects': USE_DIALECTS,
+        'review_patterns': USE_REVIEW_PATTERNS,
+        'anti_repeat': USE_ANTI_REPEAT,
+        'trending': USE_TRENDING,
+        'mahalli_intel': USE_MAHALLI,
+    }
+    badges_html = ""
+    for name, loaded in engines.items():
+        cls = "engine-on" if loaded else "engine-off"
+        icon = "✅" if loaded else "❌"
+        badges_html += f'<span class="engine-status {cls}">{icon} {name}</span> '
+    st.markdown(badges_html, unsafe_allow_html=True)
+
+    engine_on = sum(1 for v in engines.values() if v)
+    engine_total = len(engines)
+    st.markdown(
+        f"<p style='color:#9a9080;font-size:13px;margin-top:8px'>"
+        f"🔌 {engine_on}/{engine_total} محرك نشط</p>",
+        unsafe_allow_html=True,
+    )
+
+    st.divider()
+
+    # --- معلومات النظام ---
+    st.markdown("#### 💻 معلومات النظام")
+    st.markdown(f"""<div class="intel-card">
+<b>📁 مسار المشروع:</b> <code style="direction:ltr">{BASE_DIR}</code><br>
+<b>🧠 نموذج AI:</b> {AI_MODEL}<br>
+<b>🔑 مفتاح AI:</b> {'✅ محمّل' if AI_KEY else '❌ غير موجود'}<br>
+<b>📦 المنتجات:</b> {len(PRODUCTS):,} عطر<br>
+<b>👤 الأسماء:</b> {len(NAMES.get('male', []))} ذكر + {len(NAMES.get('female', []))} أنثى + {len(NAMES.get('family_names', []))} عائلة<br>
+<b>🏙️ المدن:</b> {len(NAMES.get('cities', []))} مدينة<br>
+<b>⏰ الوقت:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+</div>""", unsafe_allow_html=True)
