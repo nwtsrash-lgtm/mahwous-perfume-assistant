@@ -1,0 +1,133 @@
+{
+    "stores": [
+        {
+            "name": "مهووس",
+            "name_en": "mahwous",
+            "base_url": "https://mahwous.com",
+            "platform": "salla",
+            "trending_url": "https://mahwous.com/-/c922334955",
+            "categories_url": "https://mahwous.com/-/c170801791",
+            "login_method": "salla_event",
+            "search_url": "https://mahwous.com/search?q={query}",
+            "selectors": {
+                "product_card": "s-product-card-entry, .s-product-card-entry, .product-entry, [class*='product-card']",
+                "product_name": ".s-product-card-entry__title, .product-title, h2, h3",
+                "product_price": ".s-product-card-entry__price, .product-price, .price",
+                "product_link": "a[href*='/p/'], a[href*='/product']",
+                "product_image": ".s-product-card-image img, img.product-image",
+                "add_to_cart": "salla-add-product-button, .s-add-to-cart-btn, button[class*='add']",
+                "cart_icon": "salla-cart-summary, .header-cart",
+                "checkout_button": ".checkout-btn, a[href*='checkout']",
+                "login_trigger": "button[onclick*='login::open'], .s-login-btn"
+            }
+        },
+        {
+            "name": "عبير الغرب",
+            "name_en": "abeeralgharb",
+            "base_url": "https://abeeralgharb.sa",
+            "platform": "salla",
+            "trending_url": "https://abeeralgharb.sa/best-selling",
+            "search_url": "https://abeeralgharb.sa/search?q={query}",
+            "selectors": {
+                "product_card": ".product-item, .product-card, .s-product-card-entry, [class*='product']",
+                "product_name": "h1.product-title, .product-title, .product-name, .s-product-card-entry__title, h2, h3",
+                "product_price": ".product-price, .s-product-card-entry__price, .price, [class*='price']",
+                "product_link": "a[href*='/product'], a[href*='/p/'], a",
+                "product_image": ".product-image img, .s-product-card-image img, img",
+                "add_to_cart": "salla-add-product-button, .btn-add-to-cart, .add-to-cart, [class*='add-cart'], button[class*='cart'], [data-action='addToCart']",
+                "cart_icon": ".cart-icon, [class*='cart-icon'], .header-cart, a[href*='cart']",
+                "checkout_button": ".checkout-btn, [class*='checkout'], a[href*='checkout']"
+            }
+        },
+        {
+            "name": "خبير العطور",
+            "name_en": "khbir",
+            "base_url": "https://alkhabeershop.com",
+            "platform": "salla",
+            "trending_url": "https://alkhabeershop.com/الأكثر-مبيعاً/p1623868074",
+            "search_url": "https://alkhabeershop.com/search?q={query}",
+            "selectors": {
+                "product_card": ".product-item, .product-card, .s-product-card-entry, [class*='product']",
+                "product_name": "h1.product-title, .product-title, .product-name, .s-product-card-entry__title, h2, h3",
+                "product_price": ".product-price, .s-product-card-entry__price, .price, [class*='price']",
+                "product_link": "a[href*='/product'], a[href*='/p/'], a",
+                "product_image": ".product-image img, .s-product-card-image img, img",
+                "add_to_cart": "salla-add-product-button, .btn-add-to-cart, .add-to-cart, [class*='add-cart'], button[class*='cart'], [data-action='addToCart']",
+                "cart_icon": ".cart-icon, [class*='cart-icon'], .header-cart, a[href*='cart']",
+                "checkout_button": ".checkout-btn, [class*='checkout'], a[href*='checkout']"
+            }
+        },
+        {
+            "name": "سارة ستور",
+            "name_en": "sarah",
+            "base_url": "https://sarahmakeup37.com",
+            "platform": "salla",
+            "trending_url": "https://sarahmakeup37.com/best-selling",
+            "search_url": "https://sarahmakeup37.com/search?q={query}",
+            "selectors": {
+                "product_card": ".product-item, .product-card, .s-product-card-entry, [class*='product']",
+                "product_name": "h1.product-title, .product-title, .product-name, .s-product-card-entry__title, h2, h3",
+                "product_price": ".product-price, .s-product-card-entry__price, .price, [class*='price']",
+                "product_link": "a[href*='/product'], a[href*='/p/'], a",
+                "product_image": ".product-image img, .s-product-card-image img, img",
+                "add_to_cart": "salla-add-product-button, .btn-add-to-cart, .add-to-cart, [class*='add-cart'], button[class*='cart']",
+                "cart_icon": ".cart-icon, [class*='cart-icon'], .header-cart, a[href*='cart']",
+                "checkout_button": ".checkout-btn, [class*='checkout'], a[href*='checkout']"
+            }
+        },
+        {
+            "name": "قصر الطيب",
+            "name_en": "qasralteeb",
+            "base_url": "https://www.qasralteeb.com",
+            "platform": "salla",
+            "trending_url": "https://www.qasralteeb.com/best-selling",
+            "search_url": "https://www.qasralteeb.com/search?q={query}",
+            "selectors": {
+                "product_card": ".product-item, .product-card, .s-product-card-entry, [class*='product']",
+                "product_name": "h1.product-title, .product-title, .product-name, .s-product-card-entry__title, h2, h3",
+                "product_price": ".product-price, .s-product-card-entry__price, .price, [class*='price']",
+                "product_link": "a[href*='/product'], a[href*='/p/'], a",
+                "product_image": ".product-image img, .s-product-card-image img, img",
+                "add_to_cart": "salla-add-product-button, .btn-add-to-cart, .add-to-cart, [class*='add-cart'], button[class*='cart']",
+                "cart_icon": ".cart-icon, [class*='cart-icon'], .header-cart, a[href*='cart']",
+                "checkout_button": ".checkout-btn, [class*='checkout'], a[href*='checkout']"
+            }
+        },
+        {
+            "name": "عساف",
+            "name_en": "assaf",
+            "base_url": "https://3saf.com",
+            "platform": "custom",
+            "trending_url": "https://3saf.com",
+            "search_url": "https://3saf.com/search?q={query}",
+            "selectors": {
+                "product_card": ".product-item, .product-card, [class*='product'], .grid-item",
+                "product_name": ".product-title, .product-name, h2, h3, .card-title",
+                "product_price": ".product-price, .price, [class*='price'], .amount",
+                "product_link": "a[href*='/product'], a[href*='/p/'], a",
+                "product_image": ".product-image img, .product-card img, img",
+                "add_to_cart": ".add-to-cart, button[class*='cart'], [class*='add-cart']",
+                "cart_icon": ".cart-icon, [class*='cart'], .header-cart, a[href*='cart']",
+                "checkout_button": ".checkout-btn, [class*='checkout'], a[href*='checkout']"
+            }
+        },
+        {
+            "name": "متجر عام (Salla)",
+            "name_en": "generic_salla",
+            "base_url": "",
+            "platform": "salla",
+            "trending_url": "/best-selling",
+            "search_url": "/search?q={query}",
+            "selectors": {
+                "product_card": ".product-item, .product-card, .s-product-card-entry, [class*='product']",
+                "product_name": "h1.product-title, .product-title, .product-name, .s-product-card-entry__title, h2, h3",
+                "product_price": ".product-price, .s-product-card-entry__price, .price, [class*='price']",
+                "product_link": "a[href*='/product'], a[href*='/p/'], a",
+                "product_image": ".product-image img, .s-product-card-image img, img",
+                "add_to_cart": "salla-add-product-button, .btn-add-to-cart, .add-to-cart, [class*='add-cart'], button[class*='cart']",
+                "cart_icon": ".cart-icon, [class*='cart-icon'], .header-cart, a[href*='cart']",
+                "checkout_button": ".checkout-btn, [class*='checkout'], a[href*='checkout']"
+            }
+        }
+    ]
+}

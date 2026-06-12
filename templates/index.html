@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>🌸 مساعدي في شراء العطور</title>
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--g:#ddb562;--gl:#f4e4b0;--gd:#b78f3c;--bg:#0a0a14;--c:rgba(255,255,255,.04);--cb:rgba(221,181,98,.15);--t:#e8e0d0;--t2:#9a9080}
+body{font-family:'Tajawal',sans-serif;background:var(--bg);color:var(--t);min-height:100vh}
+.w{max-width:720px;margin:0 auto;padding:14px}
+h1{font-size:1.5rem;font-weight:800;text-align:center;padding:20px 0 4px;background:linear-gradient(135deg,var(--g),var(--gl));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.sub{text-align:center;color:var(--t2);font-size:.8rem;margin-bottom:12px}
+.links{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:10px 0}
+.lnk{padding:6px 14px;border-radius:8px;text-decoration:none;font-weight:700;font-size:.8rem;transition:.2s;display:inline-flex;align-items:center;gap:4px}
+.lm{background:rgba(33,150,243,.1);border:1px solid rgba(33,150,243,.2);color:#64b5f6}.lm:hover{background:rgba(33,150,243,.18)}
+.ls{background:rgba(221,181,98,.1);border:1px solid rgba(221,181,98,.2);color:var(--gl)}.ls:hover{background:rgba(221,181,98,.18)}
+.cnt-row{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin:8px 0}
+.cnt-btn{padding:5px 14px;border-radius:8px;border:1px solid var(--cb);background:var(--c);color:var(--t2);cursor:pointer;font-family:inherit;font-size:.82rem;font-weight:600;transition:.2s}
+.cnt-btn.on{background:linear-gradient(135deg,var(--g),var(--gd));color:#1a1000;border-color:var(--g);font-weight:800}
+.cnt-btn:hover:not(.on){border-color:var(--g);color:var(--g)}
+.btn{display:block;width:100%;padding:14px;font-size:1.1rem;font-weight:800;font-family:inherit;border:none;border-radius:12px;background:linear-gradient(135deg,var(--g),var(--gd));color:#1a1000;cursor:pointer;margin:10px 0;box-shadow:0 4px 16px rgba(221,181,98,.25);transition:.2s}
+.btn:hover{transform:translateY(-1px)}.btn:active{transform:scale(.98)}
+.btn2{display:block;width:100%;padding:10px;font-size:.88rem;font-weight:700;font-family:inherit;border:2px solid var(--g);border-radius:10px;background:transparent;color:var(--g);cursor:pointer;margin:8px 0;transition:.2s}
+.btn2:hover{background:rgba(221,181,98,.06)}
+.card{background:var(--c);border:1px solid var(--cb);border-radius:12px;padding:14px;margin:14px 0;backdrop-filter:blur(8px);animation:fu .3s ease-out both}
+@keyframes fu{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.sep{border-top:1px solid rgba(221,181,98,.08);margin:10px 0}
+.pc-em{font-size:2.5rem;text-align:center}
+.pc-nm{font-size:1.35rem;font-weight:800;text-align:center;cursor:pointer;padding:2px 6px;border-radius:6px;transition:.2s}
+.pc-nm:hover{background:rgba(221,181,98,.06)}
+.pc-info{display:flex;gap:5px;justify-content:center;flex-wrap:wrap;margin:5px 0}
+.bg{display:inline-block;padding:3px 10px;border-radius:10px;font-size:.72rem;font-weight:600;cursor:pointer}
+.bg-c{background:rgba(221,181,98,.1);border:1px solid rgba(221,181,98,.2);color:var(--gl)}
+.bg-t{background:rgba(100,200,255,.06);border:1px solid rgba(100,200,255,.12);color:#80d0ff}
+.bg-a{background:rgba(200,200,200,.06);border:1px solid rgba(200,200,200,.12);color:#bbb}
+.sm{display:inline-flex;align-items:center;gap:2px;padding:3px 9px;border-radius:5px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.03);color:var(--t2);cursor:pointer;font-family:inherit;font-size:.7rem;transition:.2s;margin:1px}
+.sm:hover{background:rgba(221,181,98,.1);color:var(--g)}
+.smg{border-color:rgba(76,175,80,.2);color:#81c784}.smg:hover{background:rgba(76,175,80,.1);color:#a5d6a7}
+.smr{border-color:rgba(255,152,0,.2);color:#ffb74d}.smr:hover{background:rgba(255,152,0,.08);color:#ffd54f}
+.pf{background:rgba(221,181,98,.03);border:1px solid rgba(221,181,98,.08);border-radius:8px;padding:7px 10px;margin:3px 0;display:flex;justify-content:space-between;align-items:center;gap:4px;transition:.2s}
+.pf:hover{border-color:rgba(221,181,98,.18)}
+.pf-n{font-weight:700;color:var(--gl);font-size:.82rem;cursor:pointer;flex:1}.pf-n:hover{text-decoration:underline}
+.pf-p{font-weight:800;color:var(--g);font-size:.8rem;white-space:nowrap}
+.pf-g{font-size:.6rem;padding:1px 5px;border-radius:6px;font-weight:500}
+.gf{background:rgba(233,30,99,.08);color:#f48fb1;border:1px solid rgba(233,30,99,.12)}
+.gm{background:rgba(33,150,243,.08);color:#64b5f6;border:1px solid rgba(33,150,243,.12)}
+.gu{background:rgba(156,39,176,.08);color:#ce93d8;border:1px solid rgba(156,39,176,.12)}
+.rv{padding:7px;margin:4px 0;border-radius:8px;background:rgba(255,255,255,.02);transition:.2s}
+.rv:hover{background:rgba(221,181,98,.02)}
+.rv-h{display:flex;justify-content:space-between;align-items:center;gap:4px;margin-bottom:2px}
+.rv-pn{font-weight:600;color:var(--gl);font-size:.78rem;flex:1}
+.stars{color:var(--g);font-size:.85rem;letter-spacing:1px}
+.rv-txt{font-size:.88rem;line-height:1.6;padding:5px 8px;background:rgba(255,255,255,.015);border-radius:6px;cursor:pointer;transition:.2s}
+.rv-txt:hover{background:rgba(221,181,98,.03)}
+.rv-act{display:flex;gap:3px;margin-top:3px;flex-wrap:wrap;align-items:center}
+.lb{font-size:.72rem;color:var(--t2);letter-spacing:1px;margin:8px 0 3px;font-weight:600}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%) translateY(60px);background:var(--g);color:#1a1000;padding:8px 18px;border-radius:8px;font-weight:700;font-size:.82rem;z-index:999;transition:.3s}
+.toast.show{transform:translateX(-50%) translateY(0)}
+.hid{display:none}
+.counter{text-align:center;font-size:.8rem;color:var(--g);font-weight:700;margin:6px 0}
+.addr{font-size:.7rem;color:var(--t2);background:rgba(76,175,80,.04);border:1px solid rgba(76,175,80,.1);border-radius:6px;padding:4px 10px;margin:4px auto;text-align:center;cursor:pointer;transition:.2s;max-width:fit-content}
+.addr:hover{background:rgba(76,175,80,.08);color:#a5d6a7}
+.phone-row{display:flex;align-items:center;justify-content:center;gap:5px;margin:5px 0}
+.phone-num{font-size:.88rem;font-weight:700;color:#64b5f6;cursor:pointer;direction:ltr;letter-spacing:.5px;padding:3px 10px;border-radius:6px;background:rgba(33,150,243,.05);border:1px solid rgba(33,150,243,.1);transition:.2s}
+.phone-num:hover{background:rgba(33,150,243,.1)}
+.short-code{display:inline-block;font-size:.82rem;font-weight:800;color:#ffb74d;direction:ltr;letter-spacing:1.5px;padding:3px 12px;border-radius:6px;background:rgba(255,152,0,.06);border:1px solid rgba(255,152,0,.15);cursor:pointer;transition:.2s;margin:3px auto}
+.short-code:hover{background:rgba(255,152,0,.12)}
+@media(max-width:500px){.w{padding:8px}h1{font-size:1.2rem}.pc-nm{font-size:1.1rem}}
+</style>
+</head>
+<body>
+<div class="w">
+  <h1>🌸 مساعدي في شراء العطور</h1>
+  <p class="sub">🧠 ذكاء اصطناعي • 7,797 عطر • لهجات سعودية • أرشيف ذكي</p>
+  <div class="links">
+    <a class="lnk lm" href="https://boomlify.com/ar/dashboard" target="_blank">📧 إنشاء بريد مؤقت</a>
+    <a class="lnk ls" href="https://mahwous.com" target="_blank">🛒 مهووس</a>
+    <a class="lnk ls" href="https://mahally.com" target="_blank">📦 محلي</a>
+  </div>
+  <div class="lb" style="text-align:center">عدد الشخصيات:</div>
+  <div class="cnt-row">
+    <button class="cnt-btn" onclick="setN(1,this)">1</button>
+    <button class="cnt-btn" onclick="setN(5,this)">5</button>
+    <button class="cnt-btn on" onclick="setN(10,this)">10</button>
+    <button class="cnt-btn" onclick="setN(20,this)">20</button>
+    <button class="cnt-btn" onclick="setN(50,this)">50</button>
+  </div>
+  <button class="btn" id="goBtn" onclick="gen()">✨ ولّد الشخصيات</button>
+  <div class="counter hid" id="counter"></div>
+  <button class="btn2 hid" id="cpA" onclick="cpAll()">📋 نسخ الكل</button>
+  <div id="out"></div>
+  <button class="btn2 hid" id="cpA2" onclick="cpAll()">📋 نسخ الكل</button>
+</div>
+<div class="toast" id="tst"></div>
+<script>
+let D=[],N=10;
+const $=s=>document.getElementById(s);
+function tw(m){const t=$('tst');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1500)}
+function cc(t){navigator.clipboard.writeText(t).then(()=>tw('تم النسخ ✓'))}
+function st(n){return '★'.repeat(n)+'☆'.repeat(5-n)}
+function gc(g){return g==='نسائي'?'gf':(g==='رجالي'?'gm':'gu')}
+function gl(g){return g==='نسائي'?'👩':'👨'}
+function esc(s){return (s||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}
+function setN(n,b){N=n;document.querySelectorAll('.cnt-btn').forEach(x=>x.classList.remove('on'));b.classList.add('on')}
+
+async function gen(){
+  const b=$('goBtn');b.disabled=true;b.textContent='⏳ جاري التوليد...';
+  try{
+    if(N===1){const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});D=[await r.json()];}
+    else{const r=await fetch('/api/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:N})});const d=await r.json();D=d.results;}
+    render();$('cpA').classList.remove('hid');$('cpA2').classList.remove('hid');$('counter').classList.remove('hid');
+    $('counter').textContent='✅ '+D.length+' شخصية';
+  }catch(e){tw('❌ خطأ')}
+  b.disabled=false;b.textContent='✨ ولّد شخصيات جديدة';
+}
+
+function render(){
+  let h='';
+  D.forEach((d,ci)=>{
+    const p=d.persona;
+    h+='<div class="card" id="c'+ci+'">'+
+      '<div class="pc-em">'+p.emoji+'</div>'+
+      '<div class="pc-nm" onclick="cc(this.textContent)">'+p.name+'</div>'+
+      '<div class="pc-info">'+
+        '<span class="bg bg-c" onclick="cc(\''+p.city+'\')">📍 '+p.city+'</span>'+
+        '<span class="bg bg-t">'+p.label+'</span>'+
+        '<span class="bg bg-a">'+p.age+' سنة</span>'+
+      '</div>'+
+      '<div class="phone-row">'+
+        '<span>📱</span>'+
+        '<span class="phone-num" id="ph'+ci+'" onclick="cc(this.textContent)">'+p.phone+'</span>'+
+        '<button class="sm" onclick="cc($(\'ph'+ci+'\').textContent)">📋</button>'+
+        '<button class="sm smr" onclick="newPh('+ci+')">🔄</button>'+
+      '</div>'+
+      '<div style="text-align:center;margin:4px 0">'+
+        '<div class="addr" onclick="cc(\''+esc(p.address.full)+'\')" title="انقر للنسخ">🏠 '+p.address.full+'</div>'+
+        '<div style="display:flex;gap:4px;justify-content:center;margin-top:4px;flex-wrap:wrap">'+
+          '<button class="sm" onclick="cc(\''+p.name+'\\n'+p.phone+'\\n'+p.city+'\\n'+esc(p.address.full)+'\')">📋 اسم+جوال+عنوان</button>'+
+          '<button class="sm" onclick="cc(\''+esc(p.address.full)+'\')">📋 عنوان كامل</button>'+
+          '<button class="sm" onclick="cc(\''+p.address.postal+'\')">📋 رمز بريدي</button>'+
+        '</div>'+
+      '</div>'+
+      '<div class="sep"></div>'+
+      '<div class="lb">🧴 المنتجات (<span id="pc'+ci+'">'+d.perfumes.length+'</span>)</div>'+
+      '<div id="pl'+ci+'">';
+    d.perfumes.forEach(pf=>{
+      h+='<div class="pf"><span class="pf-n" onclick="cc(\''+esc(pf.name)+'\')">'+pf.name+'</span><span class="pf-g '+gc(pf.g)+'">'+gl(pf.g)+'</span><span class="pf-p">'+pf.price+'</span><button class="sm" onclick="cc(\''+esc(pf.name)+'\')">📋</button></div>';
+    });
+    h+='</div>'+
+      '<button class="sm smg" style="display:block;width:100%;text-align:center;padding:6px;margin:6px 0;font-size:.78rem" onclick="addMore('+ci+')">➕ أضف عطور وتعليقات</button>'+
+      '<div class="sep"></div><div class="lb">💬 التقييمات</div><div id="rl'+ci+'">';
+    d.reviews.forEach((r,ri)=>{
+      h+=rvHTML(ci,ri,r);
+    });
+    h+='</div><div class="sep"></div><div class="lb">🏪 تقييم المتجر</div>'+
+      '<div class="rv"><div class="rv-h"><span class="rv-pn">متجر مهووس</span><span class="stars">'+st(d.store.rating)+'</span></div>'+
+      '<div class="rv-txt" onclick="cc(this.textContent)">'+d.store.text+'</div>'+
+      '<div class="rv-act"><button class="sm" onclick="cc(\''+esc(d.store.text)+'\')">📋</button></div></div>'+
+      '<div style="text-align:center;margin-top:8px"><button class="sm" onclick="cpOne('+ci+')">📋 نسخ هذه الشخصية كاملة</button></div>'+
+    '</div>';
+  });
+  $('out').innerHTML=h;
+}
+
+function rvHTML(ci,ri,r){
+  const id='r'+ci+'_'+ri;
+  return '<div class="rv" id="'+id+'">'+
+    '<div class="rv-h"><span class="rv-pn">'+r.product+'</span><span class="stars" id="s'+id+'">'+st(r.rating)+'</span></div>'+
+    '<div class="rv-txt" id="t'+id+'" onclick="cc(this.textContent)">'+r.text+'</div>'+
+    '<div class="rv-act">'+
+      '<button class="sm" onclick="cc($(\'t'+id+'\').textContent)">📋 تقييم</button>'+
+      '<button class="sm" onclick="cc(\''+esc(r.product)+'\')">📋 منتج</button>'+
+      '<button class="sm smr" onclick="reRev('+ci+','+ri+')">🔄 استبدال</button>'+
+    '</div></div>';
+}
+
+async function reRev(ci,ri){
+  const d=D[ci],r=d.reviews[ri];
+  try{
+    const res=await fetch('/api/regen-review',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({archId:d.persona.archId,product:r.product,price:r.price,brand:r.brand})});
+    const nv=await res.json();
+    d.reviews[ri]=nv;
+    const id='r'+ci+'_'+ri;
+    $('t'+id).textContent=nv.text;
+    $('s'+id).textContent=st(nv.rating);
+    tw('✅ تقييم جديد');
+  }catch(e){tw('❌')}
+}
+
+async function newPh(ci){
+  try{
+    const res=await fetch('/api/new-phone',{method:'POST',headers:{'Content-Type':'application/json'}});
+    const nv=await res.json();
+    D[ci].persona.phone=nv.phone;
+    $('ph'+ci).textContent=nv.phone;
+    tw('✅ رقم جديد');
+  }catch(e){tw('❌')}
+}
+
+async function addMore(ci){
+  const d=D[ci];
+  const existing=d.perfumes.map(p=>p.name);
+  try{
+    const res=await fetch('/api/add-perfumes',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({archId:d.persona.archId,existing:existing})});
+    const nv=await res.json();
+    if(!nv.perfumes.length){tw('⚠️ لا يوجد عطور إضافية');return;}
+    nv.perfumes.forEach(pf=>{d.perfumes.push(pf)});
+    nv.reviews.forEach(rv=>{d.reviews.push(rv)});
+    // update UI
+    const plE=$('pl'+ci);
+    nv.perfumes.forEach(pf=>{
+      plE.insertAdjacentHTML('beforeend','<div class="pf" style="animation:fu .3s ease-out both"><span class="pf-n" onclick="cc(\''+esc(pf.name)+'\')">'+pf.name+'</span><span class="pf-g '+gc(pf.g)+'">'+gl(pf.g)+'</span><span class="pf-p">'+pf.price+'</span><button class="sm" onclick="cc(\''+esc(pf.name)+'\')">📋</button></div>');
+    });
+    const rlE=$('rl'+ci);
+    nv.reviews.forEach((rv,i)=>{
+      const ri=d.reviews.length-nv.reviews.length+i;
+      rlE.insertAdjacentHTML('beforeend',rvHTML(ci,ri,rv));
+    });
+    $('pc'+ci).textContent=d.perfumes.length;
+    tw('✅ أضيف '+nv.perfumes.length+' عطور');
+  }catch(e){tw('❌')}
+}
+
+function cpOne(i){
+  const d=D[i],p=d.persona;
+  let t='👤 '+p.name+' | '+p.emoji+' '+p.label+' | '+p.age+' سنة\n📱 '+p.phone+'\n📍 '+p.city+'\n🏠 '+p.address.full+'\n\n';
+  t+='🧴 المنتجات ('+d.perfumes.length+'):\n';d.perfumes.forEach(pf=>{t+='• '+pf.name+' — '+pf.price+' ر.س\n'});
+  t+='\n💬 التقييمات:\n';d.reviews.forEach(r=>{t+=st(r.rating)+' '+r.product+'\n'+r.text+'\n\n'});
+  t+='🏪 '+st(d.store.rating)+' '+d.store.text+'\n';
+  cc(t);
+}
+function cpAll(){
+  let t='📅 شخصيات مهووس — '+D.length+' شخصية\n🛒 https://mahwous.com\n'+'═'.repeat(40)+'\n\n';
+  D.forEach((d,i)=>{const p=d.persona;t+='━━━ '+(i+1)+' ━━━\n👤 '+p.name+' | '+p.emoji+' '+p.label+' | '+p.age+' سنة\n📱 '+p.phone+' | 📍 '+p.city+'\n🏠 '+p.address.full+'\n';
+    d.perfumes.forEach(pf=>{t+='🧴 '+pf.name+' — '+pf.price+' ر.س\n'});t+='\n';
+    d.reviews.forEach(r=>{t+=st(r.rating)+' '+r.product+': '+r.text+'\n'});
+    t+='🏪 '+st(d.store.rating)+' '+d.store.text+'\n\n'});
+  cc(t);
+}
+</script>
+</body>
+</html>
