@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import sys, json, random, requests as http_req, time
+import sys, os, json, random, requests as http_req, time
 # ضمان ترميز UTF-8 للطباعة (يمنع تعطّل الإيموجي على كونسول Windows cp1256)
 try:
     sys.stdout.reconfigure(encoding='utf-8')
@@ -13,6 +13,11 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 BASE_DIR = Path(__file__).parent
+
+# المسار الثابت للبيانات المؤقتة — Railway يضبطه على /data (Persistent Volume).
+# يبقى بين عمليات النشر. الكود والبيانات الثابتة (catalog/names/.env) تبقى في BASE_DIR.
+DATA_DIR = Path(os.environ.get('DATA_DIR', str(BASE_DIR)))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # ═══════════════════════════════════════════════════════════
 # استيراد المحركات الجديدة (مع fallback آمن)
@@ -79,7 +84,7 @@ with open(BASE_DIR / 'names.json', 'r', encoding='utf-8') as f:
 # ═══════════════════════════════════════════════════════════
 # أرشيف — يستخدم anti_repeat إذا متوفر، وإلا يعمل كالسابق
 # ═══════════════════════════════════════════════════════════
-ARCHIVE_FILE = BASE_DIR / 'archive.json'
+ARCHIVE_FILE = DATA_DIR / 'archive.json'
 
 def _load_archive():
     if ARCHIVE_FILE.exists():
@@ -138,8 +143,7 @@ print(f'\U0001f4e6 Archive: {len(_load_archive().get("reviews",[]))} reviews')
 # ═══════════════════════════════════════════════════════════
 # OpenRouter AI — نصوص فريدة لكل شخصية وعطر
 # ═══════════════════════════════════════════════════════════
-import os
-# حمّل .env يدوياً
+# حمّل .env يدوياً (os مستورد في الأعلى)
 _env_path = BASE_DIR / '.env'
 if _env_path.exists():
     for line in _env_path.read_text(encoding='utf-8').strip().split('\n'):

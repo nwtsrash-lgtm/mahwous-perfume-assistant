@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 """نظام مكافحة التكرار المتقدم"""
-import json, time, re
+import os, json, time, re
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
-ARCHIVE_FILE = BASE_DIR / 'archive.json'
+# مسار ثابت للبيانات — Railway يضبطه على /data ليبقى بين عمليات النشر
+DATA_DIR = Path(os.environ.get('DATA_DIR', str(BASE_DIR)))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+ARCHIVE_FILE = DATA_DIR / 'archive.json'
 MAX_ARCHIVE = 200  # FIFO limit
 
 def _load_archive():

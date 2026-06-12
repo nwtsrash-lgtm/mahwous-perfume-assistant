@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 """نظام استخبارات محلي — Algolia Competitive Intelligence"""
-import json, math, time, requests
+import os, json, math, time, requests
 from pathlib import Path
 from datetime import datetime, timedelta
 
 BASE_DIR = Path(__file__).parent
+# مسار ثابت للبيانات — Railway يضبطه على /data ليبقى بين عمليات النشر
+DATA_DIR = Path(os.environ.get('DATA_DIR', str(BASE_DIR)))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # === Algolia Config ===
 ALGOLIA_APP_ID = 'L41Y35UONW'
@@ -19,8 +22,8 @@ ALGOLIA_HEADERS = {
 OUR_STORE_ID = 986119567
 
 # === Cache Config ===
-CACHE_FILE = BASE_DIR / 'mahalli_cache.json'
-HISTORY_FILE = BASE_DIR / 'mahalli_history.json'
+CACHE_FILE = DATA_DIR / 'mahalli_cache.json'
+HISTORY_FILE = DATA_DIR / 'mahalli_history.json'
 CACHE_TTL_HOURS = 6
 
 # === Top Search Keywords ===
