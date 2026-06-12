@@ -27,6 +27,9 @@ st.set_page_config(
 )
 
 BASE_DIR = Path(__file__).parent
+# مسار ثابت للبيانات — Railway يضبطه على /data ليبقى بين عمليات النشر
+DATA_DIR = Path(os.environ.get('DATA_DIR', str(BASE_DIR)))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # ═══════════════════════════════════════════════════════════
 #  استيراد المحركات الجديدة مع try/except
@@ -161,7 +164,7 @@ def clean_json(result):
 # ═══════════════════════════════════════════════════════════
 #  أرشيف التقييمات
 # ═══════════════════════════════════════════════════════════
-ARCHIVE_FILE = BASE_DIR / 'archive.json'
+ARCHIVE_FILE = DATA_DIR / 'archive.json'
 
 def load_archive():
     """تحميل أرشيف التقييمات"""
@@ -196,10 +199,21 @@ def archive_batch(reviews, persona_name):
             'text': rv.get('text', ''),
             'product': rv.get('product', ''),
             'persona': persona_name,
+            'rating': rv.get('rating', 5),
             'ts': int(time.time()),
         }
         arc['reviews'].append(entry)
     save_archive(arc)
+
+def suggest_review_times(count):
+    """توزيع التقييمات على ساعات الذروة بشكل طبيعي (HH:MM مرتبة)."""
+    peak_hours = [9, 10, 11, 14, 15, 16, 20, 21, 22, 23]
+    times = []
+    for _ in range(max(0, int(count))):
+        hour = random.choice(peak_hours)
+        minute = random.randint(0, 59)
+        times.append(f'{hour:02d}:{minute:02d}')
+    return sorted(times)
 
 # ═══════════════════════════════════════════════════════════
 #  Fallback: شخصيات قديمة (عند عدم وجود personas_engine)
@@ -682,6 +696,35 @@ with tab1:
         progress.progress(1.0, text=f"✅ {count} شخصية جاهزة!")
         st.session_state['results'] = results
 
+    # زر: ولّد + انسخ الكل (يبني جدولاً جاهزاً للصق في Excel/Sheets)
+    if st.button("📋 ولّد + انسخ الكل", use_container_width=True, key="gen_copy_all"):
+        results = []
+        progress = st.progress(0, text="جاري التوليد...")
+        for i in range(count):
+            progress.progress(i / count, text=f"🧠 شخصية {i + 1} من {count}...")
+            persona, perfumes = gen_persona_full()
+            reviews = gen_reviews(persona, perfumes)
+            store = gen_store_review(persona)
+            results.append({'persona': persona, 'perfumes': perfumes,
+                            'reviews': reviews, 'store': store})
+        progress.progress(1.0, text=f"✅ {count} شخصية جاهزة!")
+        st.session_state['results'] = results
+        # بناء نص مجمّع: صف لكل تقييم (مفصول بـ Tab)
+        rows = ["الاسم\tالجوال\tالعنوان\tالمنتج\tالنجوم\tالتقييم"]
+        for r in results:
+            p = r['persona']
+            for rv in r['reviews']:
+                rows.append("\t".join([
+                    str(p.get('name', '')), str(p.get('phone', '')),
+                    str(p.get('address', '')), str(rv.get('product', '')),
+                    str(rv.get('rating', 5)), str(rv.get('text', '')),
+                ]))
+        st.session_state['copy_all_text'] = "\n".join(rows)
+
+    if st.session_state.get('copy_all_text'):
+        st.markdown("**📋 كل البيانات (انسخها للصقها في Excel / Google Sheets):**")
+        st.code(st.session_state['copy_all_text'], language=None)
+
     # === عرض النتائج ===
     if 'results' in st.session_state:
         for idx, r in enumerate(st.session_state['results']):
@@ -849,6 +892,9 @@ with tab2:
 <div class="info-row">
     المنافس الأول: {comp_name if comp_name else '—'} •
     الحصة اليومية: <b>{quota}</b> ({s5}×⭐5 + {s4}×⭐4)
+</div>
+<div class="info-row">
+    ⏰ توقيت مقترح: {' • '.join(suggest_review_times(quota)) if quota else '—'}
 </div>
 </div>""", unsafe_allow_html=True)
 
@@ -1047,6 +1093,7 @@ with tab3:
     st.markdown("#### 💻 معلومات النظام")
     st.markdown(f"""<div class="intel-card">
 <b>📁 مسار المشروع:</b> <code style="direction:ltr">{BASE_DIR}</code><br>
+<b>💾 مسار البيانات (DATA_DIR):</b> <code style="direction:ltr">{DATA_DIR}</code><br>
 <b>🧠 نموذج AI:</b> {AI_MODEL}<br>
 <b>🔑 مفتاح AI:</b> {'✅ محمّل' if AI_KEY else '❌ غير موجود'}<br>
 <b>📦 المنتجات:</b> {len(PRODUCTS):,} عطر<br>
@@ -1054,3 +1101,47 @@ with tab3:
 <b>🏙️ المدن:</b> {len(NAMES.get('cities', []))} مدينة<br>
 <b>⏰ الوقت:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 </div>""", unsafe_allow_html=True)
+
+    st.divider()
+
+    # --- إحصائيات الأداء ---
+    st.markdown("### 📈 إحصائيات الأداء")
+    from collections import Counter
+    _arc = load_archive()
+    _reviews = _arc.get('reviews', [])
+    if not _reviews:
+        st.info("💡 لا توجد تقييمات في الأرشيف بعد — ولّد بعض الشخصيات لرؤية الإحصائيات.")
+    else:
+        total = len(_reviews)
+        # توزيع النجوم الفعلي
+        ratings = Counter(r.get('rating', 5) for r in _reviews if 'rating' in r)
+        rated = sum(ratings.values())
+        if rated:
+            st.markdown("**توزيع النجوم الفعلي:**")
+            lines = []
+            for star in [5, 4, 3, 2, 1]:
+                cnt = ratings.get(star, 0)
+                pct = round(cnt / rated * 100)
+                bar = '█' * (pct // 2) + '░' * (50 - pct // 2)
+                lines.append(f"{star}⭐ {bar} {pct}% ({cnt})")
+            st.markdown("```\n" + "\n".join(lines) + "\n```")
+
+        # أكثر المنتجات تقييماً
+        products_c = Counter(r.get('product', '') for r in _reviews if r.get('product'))
+        if products_c:
+            st.markdown("**أكثر المنتجات تقييماً:**")
+            for prod, cnt in products_c.most_common(5):
+                st.markdown(f"- {prod}: **{cnt}** تقييم")
+
+        # أكثر الشخصيات نشاطاً
+        personas_c = Counter(r.get('persona', '') for r in _reviews if r.get('persona'))
+        if personas_c:
+            st.markdown("**أكثر الشخصيات نشاطاً:**")
+            for psn, cnt in personas_c.most_common(5):
+                st.markdown(f"- {psn}: **{cnt}** تقييم")
+
+        st.markdown(
+            f"<p style='color:#9a9080;font-size:13px;margin-top:8px'>"
+            f"📊 الإجمالي: {total} تقييم محفوظ ({rated} منها بنجوم)</p>",
+            unsafe_allow_html=True,
+        )

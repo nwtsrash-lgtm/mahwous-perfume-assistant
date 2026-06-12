@@ -106,11 +106,11 @@ def _algolia_query(query='', filters='', facet_filters=None, hits_per_page=100, 
         if r.status_code == 200:
             return r.json()
         else:
-            print(f'⚠️ Algolia HTTP {r.status_code}')
-            return {'hits': [], 'nbHits': 0}
+            print(f'[Algolia Error] HTTP {r.status_code}')
+            return None  # None = فشل (نميّزه عن نتيجة فارغة مشروعة)
     except Exception as e:
-        print(f'❌ Algolia Error: {e}')
-        return {'hits': [], 'nbHits': 0}
+        print(f'[Algolia Error] {e}')
+        return None
 
 def get_our_products(use_cache=True):
     """جلب كل منتجاتنا مع بيانات التقييم"""
@@ -119,13 +119,16 @@ def get_our_products(use_cache=True):
         if cache.get('our_products') and not is_cache_stale():
             return cache['our_products']
     
-    products, page = [], 0
+    products, page, failed = [], 0, False
     while True:
         result = _algolia_query(
             facet_filters=['store_id:986119567'],
             hits_per_page=100,
             page=page
         )
+        if result is None:  # فشل شبكة/مفتاح
+            failed = True
+            break
         hits = result.get('hits', [])
         if not hits:
             break
@@ -133,12 +136,21 @@ def get_our_products(use_cache=True):
         page += 1
         if page > 50:  # Safety limit
             break
-    
+
+    # graceful degradation: عند الفشل (أو لا نتائج) لا نكتب فوق الكاش الجيد
+    if failed or not products:
+        cache = _load_cache()
+        old = cache.get('our_products', [])
+        if old:
+            print('[Algolia] using cached our_products (fetch failed/empty)')
+            return old
+        return products
+
     # Update cache
     cache = _load_cache()
     cache['our_products'] = products
     _save_cache(cache)
-    
+
     return products
 
 def get_competitors(product_name, limit=5, use_cache=True, _cache=None, _stale=None):
@@ -163,6 +175,8 @@ def get_competitors(product_name, limit=5, use_cache=True, _cache=None, _stale=N
         hits_per_page=limit,
         get_ranking=True
     )
+    if result is None:  # فشل: أعد آخر كاش متاح بدل الكتابة فوقه
+        return cache.get('competitors', {}).get(cache_key, [])
     competitors = result.get('hits', [])
 
     # تحديث الكاش (الملف يُحفظ مرة واحدة من المستدعي عند الكاش المشترك)
@@ -181,14 +195,17 @@ def get_our_rank(search_query, use_cache=True):
             return cached.get('rank'), cached.get('product')
     
     result = _algolia_query(query=search_query, hits_per_page=50)
-    
+    if result is None:  # فشل: أعد آخر كاش متاح بدل الكتابة فوقه
+        cached = _load_cache().get('rankings', {}).get(search_query, {})
+        return cached.get('rank'), cached.get('product')
+
     rank, product = None, None
     for i, h in enumerate(result.get('hits', []), 1):
         if h.get('store_id') == OUR_STORE_ID:
             rank = i
             product = h
             break
-    
+
     # Update cache
     cache = _load_cache()
     if 'rankings' not in cache:

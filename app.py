@@ -541,6 +541,24 @@ def _gen_one():
 @app.route('/')
 def index(): return render_template('index.html')
 
+@app.route('/health')
+def health():
+    """Railway health check — حالة المحركات والبيانات"""
+    return jsonify({
+        'status': 'ok',
+        'engines': {
+            'personas': USE_NEW_PERSONAS,
+            'dialects': USE_DIALECTS,
+            'patterns': USE_PATTERNS,
+            'anti_repeat': USE_ANTI_REPEAT,
+            'trending': USE_TRENDING,
+            'intel': USE_INTEL,
+        },
+        'products': len(PRODUCTS),
+        'archive': len(_load_archive().get('reviews', [])),
+        'data_dir': str(DATA_DIR),
+    })
+
 @app.route('/api/generate', methods=['POST'])
 def generate(): return jsonify(_gen_one())
 
@@ -673,12 +691,14 @@ def api_intel_refresh():
 if __name__ == '__main__':
     arc = _load_archive()
     print('='*50)
-    print('Perfume Assistant - AI Mode (Enhanced)')
-    print(f'   {len(ARCHETYPES)} archetypes x {len(PRODUCTS)} products')
-    print(f'   AI: {AI_MODEL}')
+    print('Perfume Assistant - AI Mode (Railway)')
+    print(f'   DATA_DIR: {DATA_DIR}')
+    print(f'   Products: {len(PRODUCTS)}')
     print(f'   Archive: {len(arc.get("reviews",[]))} reviews (max 200 FIFO)')
-    print(f'   New Engines: Personas={USE_NEW_PERSONAS} Dialects={USE_DIALECTS} Patterns={USE_PATTERNS}')
-    print(f'   Anti-Repeat={USE_ANTI_REPEAT} Trending={USE_TRENDING} Intel={USE_INTEL}')
-    print('   http://localhost:5000')
+    print(f'   Engines: P={USE_NEW_PERSONAS} D={USE_DIALECTS} R={USE_PATTERNS}')
+    print(f'            A={USE_ANTI_REPEAT} T={USE_TRENDING} I={USE_INTEL}')
+    print(f'   AI: {AI_MODEL}')
+    print(f'   AI_KEY: {"***" + AI_KEY[-6:] if AI_KEY else "MISSING!"}')
     print('='*50)
-    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)

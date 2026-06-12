@@ -4,6 +4,8 @@ __pycache__/
 .env
 venv/
 archive.json
+mahalli_cache.json
+mahalli_history.json
 test_ai.py
 test_api.py
 *.log
