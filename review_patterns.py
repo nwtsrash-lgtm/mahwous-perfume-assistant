@@ -130,6 +130,66 @@ REVIEW_PATTERNS = {
             'تركيبته متوازنة بين العود والورد الطائفي مع قاعدة عنبرية',
         ],
     },
+    'season': {
+        'weight': 6,
+        'words': (4, 12),
+        'desc': 'مناسبته للموسم (شتوي/صيفي)',
+        'desc_en': 'Seasonal suitability (winter/summer)',
+        'examples': [
+            'دافي وشتوي يجنن', 'مثالي للصيف خفيف ومنعش',
+            'حطيته بالبرد وكان رهيب', 'للأجواء الحارة ممتاز ما يثقل',
+        ],
+    },
+    'dupe_compare': {
+        'weight': 5,
+        'words': (5, 15),
+        'desc': 'مقارنة بعطر مشهور أو بديل أرخص',
+        'desc_en': 'Compared to a famous designer/niche or as a cheaper dupe',
+        'examples': [
+            'قريب من عطر غالي جربته بس بنص السعر', 'بديل ممتاز للعطر الأصلي',
+            'يشبه ريحة عطر مشهور والثبات أحسن',
+        ],
+    },
+    'skin_reaction': {
+        'weight': 4,
+        'words': (5, 14),
+        'desc': 'تفاعله مع البشرة/الكيمياء',
+        'desc_en': 'How it reacts with skin chemistry',
+        'examples': [
+            'على بشرتي طلع أحلى من القماش', 'يتفاعل مع جلدي ويطلع دافي',
+            'على جسمي ثباته أقوى من ما توقعت',
+        ],
+    },
+    'second_opinion': {
+        'weight': 4,
+        'words': (5, 14),
+        'desc': 'رأي شخص قريب (الزوجة/الربع/الأهل)',
+        'desc_en': "Someone else's reaction (spouse/friends/family)",
+        'examples': [
+            'زوجتي قالت ريحته تجنن', 'الربع سألوني عنه أول ما جلست',
+            'أهل البيت كلهم عجبهم',
+        ],
+    },
+    'occasion_specific': {
+        'weight': 4,
+        'words': (5, 14),
+        'desc': 'لمناسبة محددة (عيد/رمضان/عرس/جمعة)',
+        'desc_en': 'For a specific occasion (Eid/Ramadan/wedding/Friday)',
+        'examples': [
+            'لبسته بالعيد وكان مميز', 'حطيته للتراويح برمضان وريحته تشرح',
+            'استخدمته بعرس وكان الاختيار الصح',
+        ],
+    },
+    'value_focus': {
+        'weight': 5,
+        'words': (4, 12),
+        'desc': 'القيمة مقابل السعر',
+        'desc_en': 'Value for money focus',
+        'examples': [
+            'قيمته أعلى من سعره بمراحل', 'بهالسعر صفقة ما تتعوض',
+            'دفعت قليل وحصلت فخامة',
+        ],
+    },
 }
 
 # ═══════════════════════════════════════════════════════════

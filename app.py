@@ -1,5 +1,10 @@
 # -*- coding: utf-8 -*-
-import sys, os, json, random, requests as http_req, time
+import sys, os, json, re, random, requests as http_req, time
+from requests.adapters import HTTPAdapter
+try:
+    from urllib3.util.retry import Retry
+except ImportError:  # توافق مع إصدارات urllib3 الأقدم
+    from requests.packages.urllib3.util.retry import Retry
 # ضمان ترميز UTF-8 للطباعة (يمنع تعطّل الإيموجي على كونسول Windows cp1256)
 try:
     sys.stdout.reconfigure(encoding='utf-8')
@@ -63,6 +68,24 @@ try:
 except ImportError:
     USE_TRENDING = False
     print('\u26a0\ufe0f trending not found')
+
+# \u062f\u0648\u0627\u0644 \u062a\u062a\u0628\u0639 \u0627\u0644\u062a\u0643\u0631\u0627\u0631 (\u0623\u0646\u0645\u0627\u0637 + \u0635\u0641\u0627\u062a) \u2014 \u062a\u064f\u0633\u062a\u062f\u0639\u0649 \u0628\u0639\u062f \u0643\u0644 \u062a\u0648\u0644\u064a\u062f AI \u0646\u0627\u062c\u062d
+try:
+    from anti_repeat import track_pattern as ar_track_pattern, track_adjective as ar_track_adjective
+    USE_AR_TRACK = True
+except ImportError:
+    USE_AR_TRACK = False
+
+# \u0645\u062d\u0631\u0643 \u0627\u0644\u0642\u0648\u0627\u0644\u0628 \u0627\u0644\u0636\u062e\u0645 \u2014 \u0634\u0628\u0643\u0629 \u0627\u0644\u0623\u0645\u0627\u0646 \u0627\u0644\u062d\u0642\u064a\u0642\u064a\u0629 \u0639\u0646\u062f \u062a\u0639\u0637\u0651\u0644 \u0627\u0644\u0640 AI
+try:
+    from review_generator import ReviewGenerator
+    fallback_gen = ReviewGenerator()
+    USE_REVIEW_GEN = True
+    print('\u2705 review_generator loaded (fallback engine)')
+except Exception as _e:
+    fallback_gen = None
+    USE_REVIEW_GEN = False
+    print(f'\u26a0\ufe0f review_generator not available: {_e}')
 
 try:
     from mahalli_intel import (get_our_products as intel_get_our_products,
@@ -154,19 +177,49 @@ if _env_path.exists():
 AI_KEY = os.environ.get('AI_KEY', '')
 AI_URL = 'https://openrouter.ai/api/v1/chat/completions'
 AI_MODEL = 'google/gemini-2.5-flash'
+AI_TIMEOUT = 15          # مهلة قصيرة لتوليد مباشر وسريع للواجهة
+AI_TEMPERATURE = 0.9     # درجة إبداع عالية لضمان تنوع النصوص
 
-def _ai_call(prompt, max_tokens=1200):
-    """استدعاء AI عبر OpenRouter"""
+# جلسة HTTP ثابتة مع إعادة محاولة تلقائية — تستقر تحت ضغط الواجهة المباشرة
+_ai_session = http_req.Session()
+_ai_retry = Retry(
+    total=3, connect=3, read=2, backoff_factor=0.5,
+    status_forcelist=(429, 500, 502, 503, 504),
+    allowed_methods=frozenset(['POST']),
+)
+_ai_session.mount('https://', HTTPAdapter(max_retries=_ai_retry))
+_ai_session.headers.update({
+    'Authorization': f'Bearer {AI_KEY}',
+    'Content-Type': 'application/json',
+})
+
+
+def extract_json(text):
+    """استخراج كائن JSON بأمان من رد الـ AI حتى لو تضمّن نصاً إضافياً.
+
+    يبحث عن أول '{' وآخر '}' عبر Regex لمنع تعطّل الكود إذا أرجع النموذج
+    نصاً عادياً مع الـ JSON أو غلّفه بـ markdown.
+    """
+    if not text:
+        return None
     try:
-        r = http_req.post(AI_URL, headers={
-            'Authorization': f'Bearer {AI_KEY}',
-            'Content-Type': 'application/json',
-        }, json={
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if match:
+            return json.loads(match.group(0))
+        return json.loads(text)
+    except Exception:
+        return None
+
+
+def _ai_call(prompt, max_tokens=1200, temperature=AI_TEMPERATURE):
+    """استدعاء AI عبر OpenRouter — جلسة ثابتة + Retry + مهلة 15ث"""
+    try:
+        r = _ai_session.post(AI_URL, json={
             'model': AI_MODEL,
             'messages': [{'role':'user','content':prompt}],
             'max_tokens': max_tokens,
-            'temperature': 1.0,
-        }, timeout=60)
+            'temperature': temperature,
+        }, timeout=AI_TIMEOUT)
         data = r.json()
         if r.status_code != 200:
             err = data.get('error',{}).get('message','unknown')
@@ -176,6 +229,66 @@ def _ai_call(prompt, max_tokens=1200):
     except Exception as e:
         print(f'❌ AI Error: {e}')
         return None
+
+def _make_persona_for_arch(arch):
+    """شخصية كاملة من archetype — عميقة (7 أبعاد) إن توفّر المحرك الجديد.
+
+    تضمن أن البرومبت المتقدم يجد كل المفاتيح (dialect/mood/expertise...)
+    حتى في مسارات regen/add-perfumes التي كانت تمرر شخصية ناقصة.
+    """
+    if USE_NEW_PERSONAS:
+        return generate_persona(arch)
+    age = random.randint(*arch['age'])
+    city = _city()
+    return {
+        'name': _name(arch['g']), 'label': arch['label'], 'gender': arch['g'],
+        'age': age, 'city': city, 'emoji': arch.get('emoji', ''), 'archId': arch['id'],
+        'address': _national_address(city), 'phone': _phone(),
+    }
+
+
+def _build_cross_sell(current_name, perfumes):
+    """توجيه Cross-Sell/Layering: يذكر منتجاً ثانياً من نفس المتجر داخل التقييم.
+
+    يرفع قيمة السلة. يُستخدم منتج آخر من نفس سلة الشخصية (طبيعي أكثر).
+    يرجع نصاً (قد يكون فارغاً).
+    """
+    others = [p['name'] for p in perfumes if p.get('name') and p['name'] != current_name]
+    if not others or random.random() >= 0.30:
+        return ''
+    other = random.choice(others)
+    if random.random() < 0.5:
+        return ('## ترابط منتجات (Cross-Sell):\n'
+                f'- اذكر بعفوية أنك طلبت أيضاً "{other}" من نفس المتجر بنفس الطلب وامدحه بإيجاز '
+                '(كلمة أو كلمتين) — لا تجعله محور التقييم.')
+    return ('## وصفة سرية (Layering):\n'
+            f'- اقترح خلطة شخصية اكتشفتها: رشة من هذا العطر وفوقها رشة من "{other}" من نفس المتجر، '
+            'وصف النتيجة باختصار كأنها سر مميز.')
+
+
+def _make_master_prompt(persona, product_name, used_block, extra_block=''):
+    """بناء البرومبت المتقدم إجبارياً. يرجع (prompt, params).
+
+    review_patterns اختياري (له بدائل افتراضية داخل personas_engine)، لكن
+    لا نتراجع للبرومبت القديم إلا إذا فشل تحميل personas_engine بالكامل.
+    """
+    if USE_NEW_PERSONAS:
+        params = generate_review_params(persona)
+        prompt = build_master_prompt(persona, product_name, params, used_block, extra_block)
+        return prompt, params
+    # حالة قصوى: personas_engine غير محمّل إطلاقاً
+    rating = 5 if random.random() < 0.6 else (4 if random.random() < 0.7 else 3)
+    g = 'رجل' if persona.get('gender') == 'male' else 'امرأة'
+    prompt = (
+        f"اكتب تقييم واحد كعميل سعودي حقيقي بلهجة سعودية عامية.\n"
+        f"العميل: {persona.get('label','')}، {g}، {persona.get('age','')} سنة، من {persona.get('city','')}\n"
+        f"العطر: {product_name}\n"
+        f"اكتب 3-20 كلمة. التقييم {rating} نجوم.\n"
+        f"{('لا تكرر: ' + used_block) if used_block else ''}\n"
+        f'أرجع JSON فقط: {{"rating": {rating}, "text": "...", "is_verified_purchase": true}}'
+    )
+    return prompt, {'rating': rating, 'pattern': 'scent_no_name'}
+
 
 def _ai_reviews(persona, perfumes):
     """توليد تقييمات AI فريدة لكل عطر — يستخدم MASTER_PROMPT المتقدم"""
@@ -188,70 +301,44 @@ def _ai_reviews(persona, perfumes):
 
     all_reviews = []
     for pf in perfumes:
-        # توليد معايير التقييم لكل منتج
-        if USE_NEW_PERSONAS and USE_PATTERNS:
-            params = generate_review_params(persona)
-            prompt = build_master_prompt(persona, pf['name'], params, used_block)
-        else:
-            # fallback إلى البرومبت القديم
-            rating = 5 if random.random() < 0.6 else (4 if random.random() < 0.7 else 3)
-            prompt = f"""اكتب تقييم واحد كعميل سعودي حقيقي.
-العميل: {persona['label']}، {'رجل' if persona['gender']=='male' else 'امرأة'}، {persona['age']} سنة، من {persona['city']}
-العطر: {pf['name']}
-اكتب 3-20 كلمة بلهجة سعودية. التقييم {rating} نجوم.
-{'لا تكرر: ' + used_block if used_block else ''}
-أرجع JSON فقط: {{"rating": {rating}, "text": "التقييم"}}"""
-            params = {'rating': rating, 'pattern': 'scent_no_name'}
+        # المحرك الإجباري: build_master_prompt من personas_engine
+        # (review_patterns اختياري — له بدائل افتراضية داخل personas_engine)
+        cross = _build_cross_sell(pf['name'], perfumes)
+        prompt, params = _make_master_prompt(persona, pf['name'], used_block, extra_block=cross)
 
         result = _ai_call(prompt, max_tokens=400)
-        if not result:
-            all_reviews.append(_fallback_single(pf))
+        rv = extract_json(result)
+        if not rv or not rv.get('text'):
+            # شبكة أمان: محرك القوالب الضخم
+            all_reviews.append(_fallback_single(pf, persona))
             continue
 
-        # تنظيف الرد
-        result = result.strip()
-        if result.startswith('```'):
-            result = result.split('\n', 1)[1] if '\n' in result else result[3:]
-            if result.endswith('```'):
-                result = result[:-3]
-            result = result.strip()
+        rv['price'] = pf['price']
+        rv['brand'] = pf['brand']
+        rv['pg'] = pf['g']
+        rv['product'] = pf['name']
+        rv['pattern'] = params.get('pattern', '')
 
-        try:
-            rv = json.loads(result)
-            rv['price'] = pf['price']
-            rv['brand'] = pf['brand']
-            rv['pg'] = pf['g']
-            rv['product'] = pf['name']
-            rv['pattern'] = params.get('pattern', '')
+        # تطبيق أخطاء إملائية إذا الشخصية تحتاج
+        if USE_DIALECTS and persona.get('has_typo', False):
+            rv['text'] = apply_typos(rv['text'], probability=1.0)
 
-            # تطبيق أخطاء إملائية إذا الشخصية تحتاج
-            if USE_DIALECTS and persona.get('has_typo', False):
-                rv['text'] = apply_typos(rv['text'], probability=1.0)
+        # التحقق من التكرار — أعد التوليد بنص مختلف بدل إضافة فراغ بلا معنى
+        if USE_ANTI_REPEAT and is_duplicate(rv.get('text', '')):
+            retry = _ai_call(
+                prompt + '\n\n⚠️ تنبيه: التقييم السابق كان مكرراً. اكتب نصاً مختلفاً تماماً ببداية وكلمات مختلفة.',
+                max_tokens=400)
+            rv2 = extract_json(retry)
+            if rv2 and rv2.get('text') and not is_duplicate(rv2['text']):
+                rv['text'] = rv2['text']
+                if 'rating' in rv2:
+                    rv['rating'] = rv2['rating']
 
-            # التحقق من التكرار — أعد التوليد بنص مختلف بدل إضافة فراغ بلا معنى
-            if USE_ANTI_REPEAT and is_duplicate(rv.get('text', '')):
-                retry = _ai_call(
-                    prompt + '\n\n⚠️ تنبيه: التقييم السابق كان مكرراً. اكتب نصاً مختلفاً تماماً ببداية وكلمات مختلفة.',
-                    max_tokens=400)
-                if retry:
-                    retry = retry.strip()
-                    if retry.startswith('```'):
-                        retry = retry.split('\n', 1)[1] if '\n' in retry else retry[3:]
-                        if retry.endswith('```'):
-                            retry = retry[:-3]
-                        retry = retry.strip()
-                    try:
-                        rv2 = json.loads(retry)
-                        if rv2.get('text') and not is_duplicate(rv2['text']):
-                            rv['text'] = rv2['text']
-                            if 'rating' in rv2:
-                                rv['rating'] = rv2['rating']
-                    except Exception:
-                        pass
+        # تتبع النمط لتغذية مكافحة التكرار
+        if USE_AR_TRACK:
+            ar_track_pattern(params.get('pattern', 'default'))
 
-            all_reviews.append(rv)
-        except:
-            all_reviews.append(_fallback_single(pf))
+        all_reviews.append(rv)
 
     # حفظ في الأرشيف
     _archive_batch(all_reviews, persona.get('name', ''))
@@ -265,39 +352,24 @@ def _ai_single_review(persona, product):
         used = _get_used_texts(_load_archive(), limit=20)
         used_block = '\n'.join([f'- {t}' for t in used[-15:]]) if used else ''
 
-    if USE_NEW_PERSONAS and USE_PATTERNS:
-        params = generate_review_params(persona)
-        prompt = build_master_prompt(persona, product['name'], params, used_block)
-    else:
-        prompt = f"""اكتب تقييم واحد فقط كعميل سعودي حقيقي.
-العميل: {persona['label']}، {'رجل' if persona['gender']=='male' else 'امرأة'}، {persona['age']} سنة، من {persona['city']}
-العطر: {product['name']}
-اكتب 3-20 كلمة بلهجة سعودية. التقييم 4 أو 5.
-{'لا تكرر: ' + used_block if used_block else ''}
-أرجع JSON فقط: {{"rating": 5, "text": "التقييم"}}"""
+    prompt, params = _make_master_prompt(persona, product['name'], used_block)
 
     result = _ai_call(prompt, max_tokens=300)
-    if not result:
-        return _fallback_single(product)
+    rv = extract_json(result)
+    if not rv or not rv.get('text'):
+        return _fallback_single(product, persona)
 
-    result = result.strip()
-    if result.startswith('```'):
-        result = result.split('\n', 1)[1] if '\n' in result else result[3:]
-        if result.endswith('```'): result = result[:-3]
-        result = result.strip()
-
-    try:
-        rv = json.loads(result)
-        rv['product'] = product['name']
-        rv['price'] = product['price']
-        rv['brand'] = product['brand']
-        rv['pg'] = product.get('g','مشترك')
-        if USE_DIALECTS and persona.get('has_typo', False):
-            rv['text'] = apply_typos(rv['text'], probability=1.0)
-        _archive_review(rv['text'], product['name'], persona.get('name',''))
-        return rv
-    except:
-        return _fallback_single(product)
+    rv['product'] = product['name']
+    rv['price'] = product['price']
+    rv['brand'] = product['brand']
+    rv['pg'] = product.get('g','مشترك')
+    rv['pattern'] = params.get('pattern', '')
+    if USE_DIALECTS and persona.get('has_typo', False):
+        rv['text'] = apply_typos(rv['text'], probability=1.0)
+    if USE_AR_TRACK:
+        ar_track_pattern(params.get('pattern', 'default'))
+    _archive_review(rv['text'], product['name'], persona.get('name',''))
+    return rv
 
 def _ai_store_review(persona):
     """تقييم متجر بالـ AI"""
@@ -306,17 +378,10 @@ def _ai_store_review(persona):
 اذكر شي مثل: التوصيل، التغليف، الأصالة، خدمة العملاء.
 أرجع JSON فقط: {{"rating": 5, "text": "..."}}"""
     result = _ai_call(prompt, max_tokens=200)
-    if not result:
-        return {'rating':5,'text':'متجر ممتاز والعطور أصلية والتوصيل سريع'}
-    result = result.strip()
-    if result.startswith('```'):
-        result = result.split('\n', 1)[1] if '\n' in result else result[3:]
-        if result.endswith('```'): result = result[:-3]
-        result = result.strip()
-    try:
-        return json.loads(result)
-    except:
-        return {'rating':5,'text':'متجر ممتاز والعطور أصلية والتوصيل سريع'}
+    rv = extract_json(result)
+    if rv and rv.get('text'):
+        return rv
+    return {'rating':5,'text':'متجر ممتاز والعطور أصلية والتوصيل سريع'}
 
 # ═══════════ Fallback بدون AI ═══════════
 FALLBACK_M = [
@@ -337,30 +402,49 @@ FALLBACK_F = [
     'كل ما ألبسه أحس بثقة، ريحة أنثوية أموت عليها',
 ]
 
-def _fallback_reviews(persona, perfumes):
-    pool = FALLBACK_F if persona['gender']=='female' else FALLBACK_M
-    reviews = []
-    for pf in perfumes:
-        tpl = random.choice(pool)
-        short = ' '.join(pf['name'].split()[:3])
-        txt = tpl.replace('{n}', short)
-        rt = 5 if random.random() < .7 else 4
-        reviews.append({'product':pf['name'],'price':pf['price'],'brand':pf['brand'],
-                        'pg':pf['g'],'rating':rt,'text':txt})
-    return reviews
+def _pg_to_gender(pg):
+    """تحويل تصنيف العطر العربي إلى وسيط ReviewGenerator"""
+    if pg == 'رجالي':
+        return 'male'
+    if pg == 'نسائي':
+        return 'female'
+    return 'unisex'
 
-def _fallback_single(product):
+
+def _fallback_single(product, persona=None):
+    """شبكة أمان: محرك القوالب الضخم (review_generator) عند تعطّل الـ AI.
+
+    يلجأ للمصفوفات الثابتة فقط إذا فشل المحرك أو لم يتوفر.
+    """
+    pg = product.get('g', 'مشترك')
+    if persona and persona.get('gender'):
+        gender = 'male' if persona['gender'] == 'male' else 'female'
+    else:
+        gender = _pg_to_gender(pg)
+
+    if USE_REVIEW_GEN and fallback_gen is not None:
+        try:
+            res = fallback_gen.generate_reviews(
+                product['name'], product.get('price', 0), gender=gender, count=1)
+            if res:
+                return {'product': product['name'], 'price': product.get('price', 0),
+                        'brand': product.get('brand', ''), 'pg': pg,
+                        'rating': res[0]['rating'], 'text': res[0]['text']}
+        except Exception as e:
+            print(f'⚠️ fallback_gen single error: {e}')
+
+    # آخر شبكة أمان: مصفوفات ثابتة
     short = ' '.join(product['name'].split()[:3])
-    opts = [
-        'عطر ممتاز وريحته تجنن، أنصح فيه بقوة',
-        f'صراحة عجبني، {short} ريحته فخمة وثباته قوي',
-        'ريحته مميزة وتدوم طول اليوم، يستاهل التجربة',
-        f'من أحلى اللي جربت، {short} يستاهل كل ريال',
-        'ثباته ممتاز وفوحانه قوي، تجربة موفقة والله',
-    ]
-    return {'product':product['name'],'price':product['price'],'brand':product['brand'],
-            'pg':product.get('g','مشترك'),'rating':5,
-            'text':random.choice(opts)}
+    pool = FALLBACK_F if gender == 'female' else FALLBACK_M
+    txt = random.choice(pool).replace('{n}', short)
+    return {'product': product['name'], 'price': product.get('price', 0),
+            'brand': product.get('brand', ''), 'pg': pg,
+            'rating': 5 if random.random() < .7 else 4, 'text': txt}
+
+
+def _fallback_reviews(persona, perfumes):
+    """تقييمات احتياطية لمجموعة عطور عبر محرك القوالب الضخم"""
+    return [_fallback_single(pf, persona) for pf in perfumes]
 
 # ═══════════ الشخصيات ═══════════
 ARCHETYPES = [
@@ -402,6 +486,35 @@ ARCHETYPES = [
      'price':(100,800),'prefers':['رجالي','مشترك'],'count':(3,6)},
     {'id':'محبة_تسوق','g':'female','label':'محبة تسوق','emoji':'👛','age':(22,35),
      'price':(100,800),'prefers':['نسائي','مشترك'],'count':(3,6)},
+    # ── شخصيات إضافية (توسعة) — يجب أن تطابق personas_engine.ARCHETYPES ──
+    {'id':'مبتعث','g':'male','label':'شاب مبتعث','emoji':'✈️','age':(22,30),
+     'price':(150,900),'prefers':['رجالي','مشترك'],'count':(2,4)},
+    {'id':'عسكري','g':'male','label':'منسوب عسكري','emoji':'🎖️','age':(24,45),
+     'price':(150,600),'prefers':['رجالي','مشترك'],'count':(2,4)},
+    {'id':'معلم','g':'male','label':'معلم','emoji':'🧑‍🏫','age':(28,50),
+     'price':(150,500),'prefers':['رجالي','مشترك'],'count':(2,4)},
+    {'id':'مهندس','g':'male','label':'مهندس','emoji':'👷','age':(26,45),
+     'price':(200,800),'prefers':['رجالي','مشترك'],'count':(2,4)},
+    {'id':'طبيب','g':'male','label':'طبيب','emoji':'🩺','age':(30,52),
+     'price':(300,1500),'prefers':['رجالي','مشترك'],'count':(2,4)},
+    {'id':'متذوق_نيش','g':'male','label':'متذوق نيش','emoji':'🌿','age':(25,45),
+     'price':(400,3000),'prefers':['رجالي','مشترك'],'count':(3,6)},
+    {'id':'عامل_مقتصد','g':'male','label':'يدوّر العملي','emoji':'🧰','age':(25,50),
+     'price':(0,180),'prefers':['رجالي','مشترك'],'count':(2,3)},
+    {'id':'وجيه','g':'male','label':'وجيه ومحب عود','emoji':'🕌','age':(45,70),
+     'price':(300,2000),'prefers':['رجالي','مشترك'],'count':(2,4)},
+    {'id':'بدوي','g':'male','label':'محب البخور والعود','emoji':'🐪','age':(30,60),
+     'price':(100,800),'prefers':['رجالي','مشترك'],'count':(2,3)},
+    {'id':'مؤثرة','g':'female','label':'مؤثرة عطور','emoji':'📸','age':(22,35),
+     'price':(200,1500),'prefers':['نسائي','مشترك'],'count':(3,6)},
+    {'id':'معلمة','g':'female','label':'معلمة','emoji':'👩‍🏫','age':(28,50),
+     'price':(150,500),'prefers':['نسائي','مشترك'],'count':(2,4)},
+    {'id':'طبيبة','g':'female','label':'طبيبة','emoji':'👩‍⚕️','age':(30,50),
+     'price':(300,1200),'prefers':['نسائي','مشترك'],'count':(2,4)},
+    {'id':'متذوقة_نيش','g':'female','label':'متذوقة نيش','emoji':'🌸','age':(25,45),
+     'price':(400,2500),'prefers':['نسائي','مشترك'],'count':(3,5)},
+    {'id':'ست_بيت','g':'female','label':'ست بيت','emoji':'🏠','age':(30,55),
+     'price':(80,400),'prefers':['نسائي','مشترك'],'count':(2,4)},
 ]
 
 # ═══════════ الكتالوج الكامل من ملف المتجر ═══════════
@@ -585,8 +698,7 @@ def regen_review():
     d = request.get_json(silent=True) or {}
     arch = next((a for a in ARCHETYPES if a['id']==d.get('archId','')), random.choice(ARCHETYPES))
     product = {'name':d.get('product',''),'price':d.get('price',0),'brand':d.get('brand',''),'g':d.get('pg','مشترك')}
-    persona = {'name':'عميل','label':arch['label'],'gender':arch['g'],
-               'age':random.randint(*arch['age']),'city':_city()}
+    persona = _make_persona_for_arch(arch)
     rv = _ai_single_review(persona, product)
     return jsonify(rv)
 
@@ -603,8 +715,7 @@ def add_perfumes():
         return jsonify({'perfumes':[],'reviews':[]})
     count = random.randint(1, min(3, len(pool)))
     perfumes = random.sample(pool, count)
-    persona = {'name':'عميل','label':arch['label'],'gender':arch['g'],
-               'age':random.randint(*arch['age']),'city':_city()}
+    persona = _make_persona_for_arch(arch)
     reviews = _ai_reviews(persona, perfumes)
     return jsonify({'perfumes': perfumes, 'reviews': reviews})
 
