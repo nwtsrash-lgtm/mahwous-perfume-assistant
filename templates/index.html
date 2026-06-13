@@ -137,9 +137,15 @@ function render(){
       '<div style="text-align:center;margin:4px 0">'+
         '<div class="addr" onclick="cc(\''+esc(p.address.full)+'\')" title="انقر للنسخ">🏠 '+p.address.full+'</div>'+
         '<div style="display:flex;gap:4px;justify-content:center;margin-top:4px;flex-wrap:wrap">'+
+          '<button class="sm" onclick="cc(\''+esc(p.address.district)+'\')">📋 الحي</button>'+
+          '<button class="sm" onclick="cc(\''+esc(p.address.street)+'\')">📋 الشارع</button>'+
+          '<button class="sm" onclick="cc(\''+p.address.building+'\')">📋 وصف البيت</button>'+
+          '<button class="sm" onclick="cc(\''+p.address.postal+'\')">📋 الرمز البريدي</button>'+
+          (p.address.short_code?'<button class="sm" onclick="cc(\''+p.address.short_code+'\')">📋 العنوان المختصر</button>':'')+
+        '</div>'+
+        '<div style="display:flex;gap:4px;justify-content:center;margin-top:4px;flex-wrap:wrap">'+
           '<button class="sm" onclick="cc(\''+p.name+'\\n'+p.phone+'\\n'+p.city+'\\n'+esc(p.address.full)+'\')">📋 اسم+جوال+عنوان</button>'+
           '<button class="sm" onclick="cc(\''+esc(p.address.full)+'\')">📋 عنوان كامل</button>'+
-          '<button class="sm" onclick="cc(\''+p.address.postal+'\')">📋 رمز بريدي</button>'+
         '</div>'+
       '</div>'+
       '<div class="sep"></div>'+
@@ -227,7 +233,7 @@ async function addMore(ci){
 
 function cpOne(i){
   const d=D[i],p=d.persona;
-  let t='👤 '+p.name+' | '+p.emoji+' '+p.label+' | '+p.age+' سنة\n📱 '+p.phone+'\n📍 '+p.city+'\n🏠 '+p.address.full+'\n\n';
+  let t='👤 '+p.name+' | '+p.emoji+' '+p.label+' | '+p.age+' سنة\n📱 '+p.phone+'\n📍 '+p.city+'\n🏠 '+p.address.full+(p.address.short_code?'\n📮 العنوان المختصر '+p.address.short_code:'')+'\n\n';
   t+='🧴 المنتجات ('+d.perfumes.length+'):\n';d.perfumes.forEach(pf=>{t+='• '+pf.name+' — '+pf.price+' ر.س\n'});
   t+='\n💬 التقييمات:\n';d.reviews.forEach(r=>{t+=st(r.rating)+' '+r.product+'\n'+r.text+'\n\n'});
   t+='🏪 '+st(d.store.rating)+' '+d.store.text+'\n';
