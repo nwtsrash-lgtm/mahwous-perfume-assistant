@@ -361,6 +361,29 @@ def _make_master_prompt(persona, product_name, used_block, extra_block=''):
 
 
 # ═══════════════════════════════════════════════════════════
+# تنظيف النص — يضمن نصاً بشرياً بلا ترقيم أو رموز (طبقة ضمان نهائية)
+# ═══════════════════════════════════════════════════════════
+
+# علامات ترقيم عربية/لاتينية + رموز تُزال لجعل النص يتدفّق طبيعياً كرسالة سريعة
+_PUNCT_RE = re.compile(r'[،,؛;:.…·•\-–—_\"“”\'‘’`«»()\[\]{}<>/\\|*#^~=+%&@!؟?]+')
+# نطاقات الإيموجي والرموز التعبيرية
+_EMOJI_RE = re.compile(
+    '[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF'
+    '\U00002190-\U000021FF\U00002B00-\U00002BFF️‍•]+')
+
+
+def _humanize(text):
+    """يزيل كل علامات الترقيم والرموز والإيموجي ويترك تدفّقاً عربياً طبيعياً."""
+    if not text:
+        return ''
+    t = text.replace('\n', ' ').replace('\r', ' ')
+    t = _EMOJI_RE.sub(' ', t)
+    t = _PUNCT_RE.sub(' ', t)
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t
+
+
+# ═══════════════════════════════════════════════════════════
 # طبقة ضمان التفرّد — كل نص (تقييم/متجر/رد) فريد لا يتكرر
 # ═══════════════════════════════════════════════════════════
 
@@ -467,6 +490,8 @@ def _write_review(persona, pf, prompt, params):
     # أخطاء إملائية طبيعية (تزيد التفرّد ولا تنقصه)
     if USE_DIALECTS and persona.get('has_typo', False):
         rv['text'] = apply_typos(rv['text'], probability=1.0)
+    # تنظيف نهائي: نص بشري متدفّق بلا ترقيم أو رموز (ضمان مطلق)
+    rv['text'] = _humanize(rv.get('text', ''))
 
     if USE_AR_TRACK:
         ar_track_pattern(params.get('pattern', 'default'))
@@ -525,6 +550,7 @@ def _ai_store_review(persona):
 {used_block if used_block else '(لا يوجد سابق)'}
 أرجع JSON فقط: {{"rating": 5, "text": "..."}}"""
     rv = _ai_write_json(prompt, max_tokens=200, attempts=5)  # يرفع AIUnavailable عند الفشل
+    rv['text'] = _humanize(rv.get('text', ''))  # بلا ترقيم أو رموز
     _register(rv['text'])
     if USE_ANTI_REPEAT:
         try:
@@ -1061,6 +1087,9 @@ def api_generate_thread():
     for reply_info in thread_data['replies']:
         text = _ai_unique_text(reply_info['prompt'], max_tokens=150,
                                attempts=4, parser=parse_ai_reply)
+        if not text:
+            return _ai_unavailable_response()
+        text = _humanize(text)  # بلا ترقيم أو رموز
         if not text:
             return _ai_unavailable_response()
         _register(text)
