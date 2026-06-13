@@ -234,7 +234,12 @@ if _env_path.exists():
             k, v = line.split('=', 1)
             os.environ[k.strip()] = v.strip()
 
-AI_KEY = os.environ.get('AI_KEY', '')
+# يقبل عدة أسماء شائعة للمتغيّر (Railway قد يستخدم OPENROUTER_API_KEY)
+AI_KEY = (os.environ.get('AI_KEY')
+          or os.environ.get('OPENROUTER_API_KEY')
+          or os.environ.get('OPENROUTER_KEY')
+          or os.environ.get('OPENROUTER_API')
+          or '').strip()
 AI_URL = 'https://openrouter.ai/api/v1/chat/completions'
 AI_MODEL = 'google/gemini-2.5-flash'
 AI_TIMEOUT = int(os.environ.get('AI_TIMEOUT', '45'))   # مهلة أطول: نقبل البطء مقابل تقييم صحيح

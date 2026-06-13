@@ -113,7 +113,11 @@ PRODUCTS = load_catalog()
 # ═══════════════════════════════════════════════════════════
 #  مفتاح AI — من البيئة أو .env
 # ═══════════════════════════════════════════════════════════
-AI_KEY = os.environ.get('AI_KEY', '')
+AI_KEY = (os.environ.get('AI_KEY')
+          or os.environ.get('OPENROUTER_API_KEY')
+          or os.environ.get('OPENROUTER_KEY')
+          or os.environ.get('OPENROUTER_API')
+          or '').strip()
 if not AI_KEY:
     _env = BASE_DIR / '.env'
     if _env.exists():
@@ -121,7 +125,7 @@ if not AI_KEY:
             for line in _env.read_text(encoding='utf-8').strip().split('\n'):
                 if '=' in line and not line.startswith('#'):
                     k, v = line.split('=', 1)
-                    if k.strip() == 'AI_KEY':
+                    if k.strip() in ('AI_KEY', 'OPENROUTER_API_KEY', 'OPENROUTER_KEY'):
                         AI_KEY = v.strip()
         except Exception:
             pass
