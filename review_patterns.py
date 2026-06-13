@@ -23,21 +23,21 @@ REVIEW_PATTERNS = {
     #  الفئة 0: أساسي (basic) — الأنماط الموروثة المحدّثة
     # ──────────────────────────────────────────────────────
     'ultra_short': {
-        'weight': 20, 'words': (1, 3), 'category': 'basic',
+        'weight': 100, 'words': (1, 3), 'category': 'basic',
         'desc': 'كلمة أو كلمتين فقط',
         'ai_directive': 'اكتب كلمة أو كلمتين فقط تعبّر عن انطباعك (مثل: ممتاز، خيال، يجنن). لا تكتب جملة كاملة.',
         'exemplars': ['ممتاز', 'حلو مرة', 'روعة والله'],
     },
     'scent_no_name': {
-        'weight': 12, 'words': (3, 12), 'category': 'basic',
+        'weight': 35, 'words': (3, 8), 'category': 'basic',
         'desc': 'عن الريحة بدون ذكر الاسم',
-        'ai_directive': 'صف الريحة والإحساس بها بدون ذكر اسم المنتج إطلاقاً. ركّز على الإحساس مو المكونات.',
+        'ai_directive': 'صف الريحة والإحساس بها بكلمات قليلة (3-8) بدون ذكر اسم المنتج إطلاقاً. ركّز على الإحساس مو المكونات.',
         'exemplars': ['ريحته فخمة والله', 'ريحة حلوة وثابتة'],
     },
     'longevity': {
-        'weight': 8, 'words': (3, 10), 'category': 'basic',
+        'weight': 18, 'words': (3, 8), 'category': 'basic',
         'desc': 'عن الثبات والفوحان',
-        'ai_directive': 'ركّز على ثبات العطر وقوة فوحانه. اذكر المدة بالساعات أو وصف مثل "طول اليوم".',
+        'ai_directive': 'ركّز باختصار على ثبات العطر وفوحانه (3-8 كلمات). اذكر المدة مثل "طول اليوم".',
         'exemplars': ['يثبت طول اليوم', 'الثبات خرافي والفوحان ممتاز'],
     },
     'gift': {
@@ -401,7 +401,7 @@ REVIEW_PATTERNS = {
     #  الفئة 6: المتجر (store)
     # ──────────────────────────────────────────────────────
     'delivery': {
-        'weight': 5, 'words': (3, 8), 'category': 'store',
+        'weight': 12, 'words': (3, 8), 'category': 'store',
         'desc': 'عن سرعة التوصيل',
         'ai_directive': 'ركّز على سرعة التوصيل المبهرة. بالغ قليلاً (أسرع من هنقرستيشن).',
         'exemplars': ['وصلني أسرع من طلبي من هنقرستيشن', 'التوصيل سريع ماشاء الله'],
@@ -677,9 +677,28 @@ LOW_RATING_REASONS = {
 #  الدوال
 # ═══════════════════════════════════════════════════════════
 
-def pick_pattern(used_patterns=None):
-    """اختيار نمط عشوائي بناءً على الأوزان مع تجنب التكرار"""
-    patterns = list(REVIEW_PATTERNS.keys())
+# الأنماط القصيرة (≤ ~8 كلمات) — أسلوب العملاء الحقيقي المختصر
+SHORT_PATTERNS = ['ultra_short', 'scent_no_name', 'longevity', 'delivery',
+                  'season', 'value_focus', 'gift', 'repeat_buy', 'with_note']
+# نسبة تفضيل النمط القصير (يُضبط عبر البيئة REVIEW_SHORT_BIAS عند الحاجة)
+import os as _os
+try:
+    SHORT_BIAS = float(_os.environ.get('REVIEW_SHORT_BIAS', '0.75'))
+except (TypeError, ValueError):
+    SHORT_BIAS = 0.75
+
+
+def pick_pattern(used_patterns=None, short_bias=None):
+    """اختيار نمط موزون مع انحياز للأنماط القصيرة (أسلوب العملاء).
+
+    بنسبة short_bias يُختار النمط من المجموعة القصيرة فقط، وإلا من كل الأنماط.
+    """
+    if short_bias is None:
+        short_bias = SHORT_BIAS
+    if short_bias and random.random() < short_bias:
+        patterns = [p for p in SHORT_PATTERNS if p in REVIEW_PATTERNS] or list(REVIEW_PATTERNS.keys())
+    else:
+        patterns = list(REVIEW_PATTERNS.keys())
     weights = [REVIEW_PATTERNS[p]['weight'] for p in patterns]
     if used_patterns:
         for i, p in enumerate(patterns):

@@ -9,8 +9,16 @@ Ultra-Realistic Saudi Review Generator v2.0
 14 شخصية سعودية واقعية × لهجات متعددة × قوالب غنية
 """
 
+import sys
 import random
 import re
+
+# ضمان ترميز UTF-8 للطباعة (يمنع تعطّل الإيموجي على كونسول Windows cp1256)
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except Exception:
+    pass
 
 
 class ReviewGenerator:
@@ -1475,9 +1483,10 @@ class ReviewGenerator:
         if opening:
             parts.append(opening)
 
-        # 2) ذكر اسم المنتج (45%)
+        # 2) ذكر اسم المنتج (45%) — لا يبدأ التقييم باسم المنتج أبداً
+        # يُضاف فقط بعد افتتاحية موجودة (parts غير فارغة)، وإلا يُسقَط.
         product_mention = self._build_product_mention(product_name, persona)
-        if product_mention:
+        if product_mention and parts:
             parts.append(product_mention)
 
         # 3) وصف الرائحة (80%)
@@ -1526,7 +1535,10 @@ class ReviewGenerator:
                 parts.append(closing)
 
         # ── تحديد عدد الجمل النهائي ──
-        target_sentences = random.randint(min_sentences, max_sentences)
+        # انحياز للقِصَر: غالبية تقييمات العملاء الحقيقية قصيرة (جملة–جملتين)
+        target_sentences = random.choices([1, 2, max_sentences],
+                                          weights=[50, 35, 15], k=1)[0]
+        target_sentences = max(1, min(target_sentences, max_sentences))
         if len(parts) > target_sentences + 1:
             # نحتفظ بالافتتاحية والخاتمة ونعمل sample من الوسط
             opening_part = parts[0] if parts else ""
@@ -1579,6 +1591,12 @@ class ReviewGenerator:
         # إزالة فواصل متكررة
         review_text = re.sub(r'(، ){2,}', '، ', review_text)
         review_text = re.sub(r'(\. ){2,}', '. ', review_text)
+        # إصلاح أداة الربط "و" قبل فاصل (يمنع "و - ريحته" / "و، ريحته" / "و. ريحته")
+        review_text = re.sub(r'\s+و\s*[-–—،.]\s*', ' و ', review_text)
+        # إزالة أداة ربط معلّقة في نهاية النص ("... و")
+        review_text = re.sub(r'\s+و\s*$', '', review_text).strip()
+        # إزالة فاصل/شرطة في بداية النص
+        review_text = re.sub(r'^\s*[-–—،.]\s*', '', review_text).strip()
 
         return {
             'text': review_text,

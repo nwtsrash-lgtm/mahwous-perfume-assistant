@@ -121,6 +121,14 @@ except ImportError:
     USE_THREADS = False
     print('\u26a0\ufe0f thread_generator not found')
 
+try:
+    from short_texts_bank import pick_short_text as stb_pick_short
+    USE_SHORT_BANK = True
+    print('\u2705 short_texts_bank loaded')
+except ImportError:
+    USE_SHORT_BANK = False
+    print('\u26a0\ufe0f short_texts_bank not found')
+
 # \u062f\u0648\u0627\u0644 \u062a\u062a\u0628\u0639 \u0627\u0644\u062a\u0643\u0631\u0627\u0631 (\u0623\u0646\u0645\u0627\u0637 + \u0635\u0641\u0627\u062a) \u2014 \u062a\u064f\u0633\u062a\u062f\u0639\u0649 \u0628\u0639\u062f \u0643\u0644 \u062a\u0648\u0644\u064a\u062f AI \u0646\u0627\u062c\u062d
 try:
     from anti_repeat import track_pattern as ar_track_pattern, track_adjective as ar_track_adjective
@@ -229,8 +237,13 @@ if _env_path.exists():
 AI_KEY = os.environ.get('AI_KEY', '')
 AI_URL = 'https://openrouter.ai/api/v1/chat/completions'
 AI_MODEL = 'google/gemini-2.5-flash'
-AI_TIMEOUT = 15          # مهلة قصيرة لتوليد مباشر وسريع للواجهة
+AI_TIMEOUT = int(os.environ.get('AI_TIMEOUT', '45'))   # مهلة أطول: نقبل البطء مقابل تقييم صحيح
 AI_TEMPERATURE = 0.9     # درجة إبداع عالية لضمان تنوع النصوص
+
+
+class AIUnavailable(Exception):
+    """يُرفع عند تعذّر الاتصال بالـ AI أو نفاد الرصيد — التطبيق يتوقف ولا يكتب قوالب."""
+    pass
 
 # جلسة HTTP ثابتة مع إعادة محاولة تلقائية — تستقر تحت ضغط الواجهة المباشرة
 _ai_session = http_req.Session()
@@ -400,15 +413,16 @@ def _ai_unique_text(prompt, max_tokens, attempts=4, parser=None, temp_step=0.06)
     return best
 
 
-def _unique_fallback(product, persona=None, attempts=8):
-    """شبكة أمان فريدة: يكرّر محرك القوالب الضخم حتى ينتج نصاً غير مكرر."""
-    last = None
-    for _ in range(attempts):
-        rv = _fallback_single(product, persona)
-        last = rv
-        if not _is_dup(rv.get('text', '')):
-            return rv
-    return last  # احتمال نادر جداً — يُقبل بعد استنفاد المحاولات
+def _ai_write_json(prompt, max_tokens, attempts=5):
+    """يكتب عبر AI فقط (لا قوالب). يرجع dict أو يرفع AIUnavailable عند تعذّر الـ AI.
+
+    إن عاد الـ AI بنص (حتى لو قريب من سابق) نقبله كأفضل جهد للتفرّد.
+    None تعني انقطاع الربط أو نفاد الرصيد → نتوقف ولا نكتب.
+    """
+    rv = _ai_unique_json(prompt, max_tokens=max_tokens, attempts=attempts)
+    if not rv or not rv.get('text'):
+        raise AIUnavailable('AI returned no text (connection lost or out of credit)')
+    return rv
 
 
 def _used_texts_block(limit=30):
@@ -429,28 +443,26 @@ def _plan_review(persona, pf, perfumes, used_block):
 
 
 def _write_review(persona, pf, prompt, params):
-    """مرحلة (الكتابة): يستدعي AI لكتابة تقييم فريد مع شبكة أمان فريدة.
+    """مرحلة (الكتابة): الـ AI فقط يكتب — لا قوالب احتياطية.
 
-    يضمن أن النص الناتج غير مكرر (محاولات AI متصاعدة ثم قوالب فريدة)،
-    ثم يسجّله في طبقة الجلسة. يرجع review_dict كامل الحقول.
+    يرفع AIUnavailable إذا تعذّر الـ AI (انقطاع/نفاد رصيد) فيتوقف التوليد.
+    يسجّل النص في طبقة الجلسة لمنع أي تكرار لاحق.
     """
-    rv = _ai_unique_json(prompt, max_tokens=400, attempts=4)
+    # سقف توكنز مرتبط بطول النمط — يمنع الإطناب فيزيائياً (يكفي JSON + النص)
+    mx = 20
+    if USE_PATTERNS:
+        mx = REVIEW_PATTERNS.get(params.get('pattern', ''), {}).get('words', (1, 20))[1]
+    max_tokens = 80 + mx * 8
+    rv = _ai_write_json(prompt, max_tokens=max_tokens, attempts=5)  # يرفع AIUnavailable عند الفشل
+    rv['price'] = pf['price']
+    rv['brand'] = pf['brand']
+    rv['pg'] = pf['g']
+    rv['product'] = pf['name']
+    rv['pattern'] = params.get('pattern', '')
+    # أخطاء إملائية طبيعية (تزيد التفرّد ولا تنقصه)
+    if USE_DIALECTS and persona.get('has_typo', False):
+        rv['text'] = apply_typos(rv['text'], probability=1.0)
 
-    if rv and rv.get('text') and not _is_dup(rv['text']):
-        rv['price'] = pf['price']
-        rv['brand'] = pf['brand']
-        rv['pg'] = pf['g']
-        rv['product'] = pf['name']
-        rv['pattern'] = params.get('pattern', '')
-        # أخطاء إملائية (تزيد التفرّد ولا تنقصه)
-        if USE_DIALECTS and persona.get('has_typo', False):
-            rv['text'] = apply_typos(rv['text'], probability=1.0)
-    else:
-        # كل محاولات AI كانت مكررة أو فشلت → قالب فريد مضمون
-        rv = _unique_fallback(pf, persona)
-        rv['pattern'] = params.get('pattern', '')
-
-    # تتبع النمط + تسجيل النص لمنع أي تكرار لاحق
     if USE_AR_TRACK:
         ar_track_pattern(params.get('pattern', 'default'))
     _register(rv.get('text', ''))
@@ -469,7 +481,7 @@ def _ai_reviews(persona, perfumes):
     return all_reviews
 
 def _ai_single_review(persona, product):
-    """توليد تقييم واحد بالـ AI — يفكّر ثم يكتب (نفس مسار التوليد الدفعي)."""
+    """توليد تقييم واحد بالـ AI فقط — يرفع AIUnavailable عند تعذّر الـ AI."""
     used_block = _used_texts_block(limit=15)
     prompt, params = _make_master_prompt(persona, product['name'], used_block)
     rv = _write_review(persona, product, prompt, params)
@@ -507,89 +519,20 @@ def _ai_store_review(persona):
 - لا تكرر أياً من هذه الصياغات السابقة:
 {used_block if used_block else '(لا يوجد سابق)'}
 أرجع JSON فقط: {{"rating": 5, "text": "..."}}"""
-    rv = _ai_unique_json(prompt, max_tokens=200, attempts=4)
-    if rv and rv.get('text') and not _is_dup(rv['text']):
-        _register(rv['text'])
-        if USE_ANTI_REPEAT:
-            try:
-                ar_archive_review(rv['text'], 'متجر مهووس', persona.get('name', ''))
-            except Exception:
-                pass
-        return rv
-    # شبكة أمان فريدة: اختر من المجموعة نصاً غير مستخدم
-    pool = list(STORE_REVIEWS.get(5, ['متجر ممتاز والعطور أصلية والتوصيل سريع']))
-    random.shuffle(pool)
-    for t in pool:
-        if not _is_dup(t):
-            _register(t)
-            return {'rating': 5, 'text': t}
-    # نادر: كل المجموعة مستخدمة — اقبل آخر ناتج AI إن وُجد وإلا واحداً من المجموعة
-    t = (rv.get('text') if rv else None) or random.choice(pool)
-    _register(t)
-    return {'rating': 5, 'text': t}
-
-# ═══════════ Fallback بدون AI ═══════════
-FALLBACK_M = [
-    'ثباته قوي وريحته رجالية فخمة، {n} من أفضل ما جربت',
-    'صراحة عجبني مرة، الفوحان ممتاز وريحته تلفت الانتباه',
-    'طلبته وعجبني كثير، ريحته مميزة وثابتة طول اليوم',
-    'سعره مناسب لجودته والتوصيل كان سريع، أنصح فيه',
-    'من يوم ما جربت {n} وأنا ما غيرته، ريحة رجالية محترمة',
-    'والله ريحته فخمة وثباته خرافي، يستاهل كل ريال',
-    'كل ما ألبسه أحد يسألني وش عطرك، {n} ريحته تجنن',
-]
-FALLBACK_F = [
-    'ريحته ناعمة وأنثوية، كل البنات سألوني عنه',
-    'حلو مررره ويثبت طول اليوم 😍، {n} صار المفضل عندي',
-    'جبته هدية لنفسي وما ندمت أبداً، ريحته تجنن',
-    'ريحته فخمة والتغليف كان رائع من مهووس',
-    'صراحة فاجأني، {n} ريحته راقية وتدوم ساعات طويلة',
-    'كل ما ألبسه أحس بثقة، ريحة أنثوية أموت عليها',
-]
-
-def _pg_to_gender(pg):
-    """تحويل تصنيف العطر العربي إلى وسيط ReviewGenerator"""
-    if pg == 'رجالي':
-        return 'male'
-    if pg == 'نسائي':
-        return 'female'
-    return 'unisex'
-
-
-def _fallback_single(product, persona=None):
-    """شبكة أمان: محرك القوالب الضخم (review_generator) عند تعطّل الـ AI.
-
-    يلجأ للمصفوفات الثابتة فقط إذا فشل المحرك أو لم يتوفر.
-    """
-    pg = product.get('g', 'مشترك')
-    if persona and persona.get('gender'):
-        gender = 'male' if persona['gender'] == 'male' else 'female'
-    else:
-        gender = _pg_to_gender(pg)
-
-    if USE_REVIEW_GEN and fallback_gen is not None:
+    rv = _ai_write_json(prompt, max_tokens=200, attempts=5)  # يرفع AIUnavailable عند الفشل
+    _register(rv['text'])
+    if USE_ANTI_REPEAT:
         try:
-            res = fallback_gen.generate_reviews(
-                product['name'], product.get('price', 0), gender=gender, count=1)
-            if res:
-                return {'product': product['name'], 'price': product.get('price', 0),
-                        'brand': product.get('brand', ''), 'pg': pg,
-                        'rating': res[0]['rating'], 'text': res[0]['text']}
-        except Exception as e:
-            print(f'⚠️ fallback_gen single error: {e}')
+            ar_archive_review(rv['text'], 'متجر مهووس', persona.get('name', ''))
+        except Exception:
+            pass
+    return rv
 
-    # آخر شبكة أمان: مصفوفات ثابتة
-    short = ' '.join(product['name'].split()[:3])
-    pool = FALLBACK_F if gender == 'female' else FALLBACK_M
-    txt = random.choice(pool).replace('{n}', short)
-    return {'product': product['name'], 'price': product.get('price', 0),
-            'brand': product.get('brand', ''), 'pg': pg,
-            'rating': 5 if random.random() < .7 else 4, 'text': txt}
-
-
-def _fallback_reviews(persona, perfumes):
-    """تقييمات احتياطية لمجموعة عطور عبر محرك القوالب الضخم"""
-    return [_fallback_single(pf, persona) for pf in perfumes]
+# ملاحظة: لا توجد كتابة احتياطية بالقوالب — الـ AI وحده يكتب.
+# عند تعذّر الـ AI (انقطاع/نفاد رصيد) يرفع _ai_write_json استثناء AIUnavailable
+# فتتوقف الكتابة وتُرجع الواجهة رسالة خطأ بدل عرض نص قالب.
+# (بنوك النصوص مثل real_reviews_bank/short_texts_bank تبقى مراجع أسلوبية تُحقن
+#  في البرومبت ليتعلّم منها النموذج فقط — لا تُعرض كتقييمات.)
 
 # ═══════════ الشخصيات ═══════════
 ARCHETYPES = [
@@ -836,15 +779,29 @@ def health():
         'data_dir': str(DATA_DIR),
     })
 
+def _ai_unavailable_response():
+    """رد موحّد عند تعذّر الـ AI — التطبيق توقّف ولم يكتب أي قالب."""
+    return jsonify({
+        'error': 'ai_unavailable',
+        'message': 'تعذّر الاتصال بالذكاء الاصطناعي أو نفد الرصيد — لم تتم كتابة أي تقييم.',
+    }), 503
+
 @app.route('/api/generate', methods=['POST'])
 @rate_limit(RATE_LIMIT_GENERATE)
-def generate(): return jsonify(_gen_one())
+def generate():
+    try:
+        return jsonify(_gen_one())
+    except AIUnavailable:
+        return _ai_unavailable_response()
 
 @app.route('/api/batch', methods=['POST'])
 @rate_limit(RATE_LIMIT_GENERATE)
 def batch():
     n = _safe_int((request.get_json(silent=True) or {}).get('count', 5), 5, 1, 20)
-    results = [_gen_one() for _ in range(n)]
+    try:
+        results = [_gen_one() for _ in range(n)]
+    except AIUnavailable:
+        return _ai_unavailable_response()
     return jsonify({'results': results, 'count': n})
 
 @app.route('/api/regen-review', methods=['POST'])
@@ -854,7 +811,10 @@ def regen_review():
     arch = next((a for a in ARCHETYPES if a['id']==d.get('archId','')), random.choice(ARCHETYPES))
     product = {'name':d.get('product',''),'price':d.get('price',0),'brand':d.get('brand',''),'g':d.get('pg','مشترك')}
     persona = _make_persona_for_arch(arch)
-    rv = _ai_single_review(persona, product)
+    try:
+        rv = _ai_single_review(persona, product)
+    except AIUnavailable:
+        return _ai_unavailable_response()
     return jsonify(rv)
 
 @app.route('/api/add-perfumes', methods=['POST'])
@@ -872,7 +832,10 @@ def add_perfumes():
     count = random.randint(1, min(3, len(pool)))
     perfumes = random.sample(pool, count)
     persona = _make_persona_for_arch(arch)
-    reviews = _ai_reviews(persona, perfumes)
+    try:
+        reviews = _ai_reviews(persona, perfumes)
+    except AIUnavailable:
+        return _ai_unavailable_response()
     return jsonify({'perfumes': perfumes, 'reviews': reviews})
 
 @app.route('/api/new-phone', methods=['POST'])
@@ -1051,6 +1014,10 @@ def api_generate_stream():
                     'reviews': reviews, 'store': store}
             yield _sse({'step': 'done', 'icon': '🎉', 'msg': 'اكتمل التوليد!', 'data': data})
 
+        except AIUnavailable:
+            # تعذّر الـ AI (انقطاع/نفاد رصيد) — نتوقف ولا نكتب قوالب
+            yield _sse({'step': 'error', 'icon': '🛑', 'fatal': True,
+                        'msg': 'تعذّر الاتصال بالذكاء الاصطناعي أو نفد الرصيد — توقّفت الكتابة.'})
         except Exception as e:
             yield _sse({'step': 'error', 'msg': str(e), 'icon': '❌'})
 
@@ -1065,28 +1032,10 @@ def api_generate_stream():
 # Thread Generation — توليد محادثات (تقييم + ردود)
 # ═══════════════════════════════════════════════════════════
 
-# مجموعة ردود احتياطية متنوّعة (بدل '👍' المتكرر) — تُختار بلا تكرار
-THREAD_FALLBACKS = [
-    'إي صح كلامك', 'توني أطلبه', 'يعطيك العافية على المعلومة', 'نفس رأيي تماماً',
-    'شكراً للتوضيح', 'جربته وعجبني', 'الله يعطيك العافية', 'كلامك سليم 100%',
-    'وأنا أؤكد كلامك', 'فدتني، مشكور', 'بطلبه بسبب كلامك', 'أتفق معك',
-]
-
-
-def _unique_thread_fallback():
-    """رد احتياطي فريد من المجموعة (يتجنّب التكرار قدر الإمكان)."""
-    pool = list(THREAD_FALLBACKS)
-    random.shuffle(pool)
-    for t in pool:
-        if not _is_dup(t):
-            return t
-    return random.choice(pool)
-
-
 @app.route('/api/generate-thread', methods=['POST'])
 @rate_limit(RATE_LIMIT_GENERATE)
 def api_generate_thread():
-    """توليد محادثة: تقييم رئيسي + ردود من عملاء آخرين"""
+    """توليد محادثة: تقييم رئيسي + ردود من عملاء آخرين (الـ AI فقط)"""
     if not USE_THREADS:
         return jsonify({'error': 'thread_generator not available'}), 503
 
@@ -1102,13 +1051,13 @@ def api_generate_thread():
     # بناء بيانات المحادثة (برومبتات فقط)
     thread_data = generate_thread_data(product_name, main_review, reply_count)
 
-    # استدعاء الـ AI لكل رد — كل رد فريد لا يتكرر
+    # استدعاء الـ AI لكل رد — فريد لا يتكرر. عند تعذّر الـ AI نتوقف ولا نكتب قوالب.
     thread_replies = []
     for reply_info in thread_data['replies']:
         text = _ai_unique_text(reply_info['prompt'], max_tokens=150,
-                               attempts=3, parser=parse_ai_reply)
-        if not text or _is_dup(text):
-            text = _unique_thread_fallback()
+                               attempts=4, parser=parse_ai_reply)
+        if not text:
+            return _ai_unavailable_response()
         _register(text)
         thread_replies.append({
             'name': reply_info['persona'].get('name', 'عميل'),

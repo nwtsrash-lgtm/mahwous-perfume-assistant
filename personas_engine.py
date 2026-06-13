@@ -694,6 +694,13 @@ def build_master_prompt(persona, product_name, review_params, used_texts_block='
 
     # --- تنويع البداية ---
     opening_rule = random.choice(OPENING_STYLES)
+
+    # --- وضع القِصَر الصارم للأنماط القصيرة جداً (≤3 كلمات) ---
+    # بدون ذكر الاسم (يوفّر كلمات) + تعليمة طول قاطعة لمنع الإطناب
+    if max_words <= 3:
+        mention_rule = 'لا تذكر اسم المنتج إطلاقاً'
+        opening_rule = ('اكتب كلمة أو كلمتين فقط (٣ كلمات كحد أقصى مطلق) تعبّر عن انطباعك — '
+                        'مثل: ممتاز / يجنن / فخم وثابت / خيال والله. ممنوع جملة كاملة أو شرح.')
     emoji_rule = 'بدون إيموجي نهائياً' if not persona['use_emoji'] else 'إيموجي واحد فقط'
     typo_rule = 'أضف خطأ إملائي طبيعي واحد' if persona['has_typo'] else 'بدون أخطاء إملائية'
     rating_note = '— اذكر سبب بسيط للنقص' if review_params['rating'] <= 3 else ''
@@ -704,13 +711,29 @@ def build_master_prompt(persona, product_name, review_params, used_texts_block='
     persona_focus = PERSONA_FOCUS.get(persona.get('archId', ''), 'يهمك تكتب رأيك الصادق بعفوية')
 
     # --- أمثلة عملاء حقيقية (V2: من البنك الخارجي + المحلي) ---
+    # للأنماط القصيرة جداً: نحقن أمثلة قصيرة (2-4 كلمات) ليتعلّم النموذج القِصَر
+    # بدل الأمثلة الطويلة التي تدفعه للإطناب.
     gender = persona.get('gender', 'male')
-    real_examples = '\n'.join(f'- {ex}' for ex in pick_real_exemplars(3, gender=gender))
+    if max_words <= 5 and _HAS_SHORT_BANK:
+        fam = _CATALOG_INDEX.get(product_name, {}).get('scent_family', '')
+        shorts = []
+        for _ in range(8):
+            t = pick_short_text(fam, gender=gender)
+            if t and t not in shorts:
+                shorts.append(t)
+            if len(shorts) >= 4:
+                break
+        real_examples = '\n'.join(f'- {ex}' for ex in shorts) if shorts \
+            else '\n'.join(f'- {ex}' for ex in pick_real_exemplars(3, gender=gender))
+    else:
+        real_examples = '\n'.join(f'- {ex}' for ex in pick_real_exemplars(3, gender=gender))
 
     # --- كتلة التوجيهات الموحّدة ---
+    # الأنماط القصيرة (≤6 كلمات) لا تتحمّل توجيهات إضافية تطيلها (SEO/زمني/cross-sell)
     seo_block = build_seo_block(persona, review_params['pattern'], max_words=max_words)
     temporal_block = build_temporal_block() if max_words >= 6 else ''
-    directives_block = '\n'.join(b for b in (seo_block, temporal_block, extra_block) if b)
+    _extra = extra_block if max_words >= 8 else ''
+    directives_block = '\n'.join(b for b in (seo_block, temporal_block, _extra) if b)
 
     prompt = MASTER_PROMPT.format(
         persona_name=persona['name'],
