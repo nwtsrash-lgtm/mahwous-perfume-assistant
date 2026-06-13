@@ -1,7 +1,15 @@
 # -*- coding: utf-8 -*-
 """نظام مكافحة التكرار المتقدم"""
-import os, json, time, re
+import sys, os, json, time, re
 from pathlib import Path
+from collections import OrderedDict, deque
+
+# ضمان ترميز UTF-8 للطباعة (يمنع تعطّل الإيموجي على كونسول Windows cp1256)
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except Exception:
+    pass
 
 BASE_DIR = Path(__file__).parent
 # مسار ثابت للبيانات — Railway يضبطه على /data ليبقى بين عمليات النشر
@@ -44,6 +52,7 @@ def archive_review(review_text, product_name, persona_name):
         'ts': int(time.time())
     })
     _save_archive(arc)
+    register_text(review_text)
 
 def archive_batch(reviews, persona_name):
     """حفظ مجموعة تقييمات"""
@@ -55,6 +64,7 @@ def archive_batch(reviews, persona_name):
             'persona': persona_name,
             'ts': int(time.time())
         })
+        register_text(rv.get('text', ''))
     _save_archive(arc)
 
 def clear_archive():
@@ -72,6 +82,13 @@ def get_archive_stats():
     }
 
 # --- Semantic Dedup ---
+def _normalize(text):
+    """تطبيع النص للمقارنة: حروف عربية فقط + مسافة مفردة (يكشف التطابق التام)."""
+    if not text:
+        return ''
+    t = re.sub(r'[^؀-ۿ\s]', '', text)
+    return re.sub(r'\s+', ' ', t).strip()
+
 def _tokenize_arabic(text):
     """تفكيك النص العربي لكلمات"""
     text = re.sub(r'[^\u0600-\u06FF\s]', '', text)  # Arabic chars only
@@ -87,11 +104,48 @@ def _jaccard_similarity(text1, text2):
     union = tokens1 | tokens2
     return len(intersection) / len(union) if union else 0.0
 
+# --- طبقة الجلسة: تضمن تفرّد كل نص داخل التشغيل الواحد فوراً ---
+# (الأرشيف FIFO=200 يغطي ما بين عمليات النشر؛ هذه الطبقة تغطي نفس التشغيل بلا انتظار)
+_session_norm = OrderedDict()        # تطابق تام سريع لكل نص مقبول (بسقف)
+_session_recent = deque(maxlen=160)  # آخر النصوص لفحص التشابه الدلالي بكلفة ثابتة
+_SESSION_CAP = 8000
+
+def register_text(text):
+    """تسجيل نص مقبول — يمنع أي تكرار له لاحقاً في نفس التشغيل."""
+    n = _normalize(text)
+    if not n:
+        return
+    _session_norm[n] = True
+    _session_norm.move_to_end(n)
+    while len(_session_norm) > _SESSION_CAP:
+        _session_norm.popitem(last=False)
+    _session_recent.append(text)
+
+def is_registered(text):
+    """هل سُجِّل هذا النص (تطابق تام) في الجلسة الحالية؟"""
+    return _normalize(text) in _session_norm
+
+def reset_session_texts():
+    """تفريغ ذاكرة الجلسة (للاختبارات أو إعادة البدء اليدوية)."""
+    _session_norm.clear()
+    _session_recent.clear()
+
 def is_duplicate(new_text, threshold=0.6):
-    """هل النص مكرر دلالياً؟"""
-    used = get_used_texts(limit=50)
-    for old_text in used:
-        if _jaccard_similarity(new_text, old_text) > threshold:
+    """هل النص مكرر؟ تطابق تام (جلسة/أرشيف) أو تشابه دلالي > العتبة."""
+    if not new_text:
+        return False
+    norm = _normalize(new_text)
+    if not norm:
+        return False
+    # 1) تطابق تام مع نص مقبول هذه الجلسة — أسرع فحص وأقواه
+    if norm in _session_norm:
+        return True
+    # 2) مقارنة بالأرشيف (آخر 80) + نصوص الجلسة الأخيرة: تطابق تام أو تشابه دلالي
+    for old in list(get_used_texts(limit=80)) + list(_session_recent):
+        on = _normalize(old)
+        if on and on == norm:
+            return True
+        if _jaccard_similarity(new_text, old) > threshold:
             return True
     return False
 

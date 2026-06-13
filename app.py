@@ -86,7 +86,8 @@ except ImportError:
     print('\u26a0\ufe0f dialects not found')
 
 try:
-    from review_patterns import (get_ai_directive, REVIEW_PATTERNS, PATTERN_CATEGORIES)
+    from review_patterns import (get_ai_directive, get_pattern_description,
+                                  REVIEW_PATTERNS, PATTERN_CATEGORIES)
     USE_PATTERNS = True
     print('\u2705 review_patterns V2 loaded (%d patterns, %d categories)' % (len(REVIEW_PATTERNS), len(PATTERN_CATEGORIES)))
 except ImportError:
@@ -96,7 +97,8 @@ except ImportError:
 try:
     from anti_repeat import (archive_review as ar_archive_review, archive_batch as ar_archive_batch,
                              get_used_texts as ar_get_used_texts, get_archive_stats as ar_get_archive_stats,
-                             clear_archive as ar_clear_archive, format_used_texts_block, is_duplicate)
+                             clear_archive as ar_clear_archive, format_used_texts_block, is_duplicate,
+                             register_text as ar_register_text)
     USE_ANTI_REPEAT = True
     print('\u2705 anti_repeat loaded')
 except ImportError:
@@ -340,98 +342,191 @@ def _make_master_prompt(persona, product_name, used_block, extra_block=''):
     return prompt, {'rating': rating, 'pattern': 'scent_no_name'}
 
 
-def _ai_reviews(persona, perfumes):
-    """توليد تقييمات AI فريدة لكل عطر — يستخدم MASTER_PROMPT المتقدم"""
-    # جلب النصوص المستخدمة
-    if USE_ANTI_REPEAT:
-        used_block = format_used_texts_block(limit=30)
-    else:
-        used = _get_used_texts(_load_archive())
-        used_block = '\n'.join([f'- {t}' for t in used[-30:]]) if used else ''
+# ═══════════════════════════════════════════════════════════
+# طبقة ضمان التفرّد — كل نص (تقييم/متجر/رد) فريد لا يتكرر
+# ═══════════════════════════════════════════════════════════
 
-    all_reviews = []
-    for pf in perfumes:
-        # المحرك الإجباري: build_master_prompt من personas_engine
-        # (review_patterns اختياري — له بدائل افتراضية داخل personas_engine)
-        cross = _build_cross_sell(pf['name'], perfumes)
-        prompt, params = _make_master_prompt(persona, pf['name'], used_block, extra_block=cross)
+def _is_dup(text):
+    """هل النص مكرر؟ (يعمل فقط عند توفّر anti_repeat)."""
+    return bool(USE_ANTI_REPEAT and text and is_duplicate(text))
 
-        result = _ai_call(prompt, max_tokens=400)
-        rv = extract_json(result)
+
+def _register(text):
+    """تسجيل نص مقبول في طبقة الجلسة لمنع تكراره لاحقاً."""
+    if USE_ANTI_REPEAT and text:
+        try:
+            ar_register_text(text)
+        except Exception:
+            pass
+
+
+def _ai_unique_json(prompt, max_tokens, attempts=4, temp_step=0.06):
+    """يستدعي AI متعدّد المحاولات حتى يحصل على JSON بنص فريد.
+
+    يصعّد الحرارة والتلميح في كل محاولة. يرجع آخر dict صالح (قد يكون مكرراً
+    لو فشلت كل المحاولات — المستدعي يلجأ لشبكة أمان فريدة).
+    """
+    best = None
+    for k in range(attempts):
+        hint = '' if k == 0 else (
+            f'\n\n⚠️ المحاولة {k+1}: النص السابق مكرر أو قريب جداً من تقييم موجود. '
+            'غيّر البداية والكلمات والفكرة كلياً واكتب صياغة جديدة تماماً.')
+        out = _ai_call(prompt + hint, max_tokens=max_tokens,
+                       temperature=min(1.0, AI_TEMPERATURE + k * temp_step))
+        rv = extract_json(out)
         if not rv or not rv.get('text'):
-            # شبكة أمان: محرك القوالب الضخم
-            all_reviews.append(_fallback_single(pf, persona))
             continue
+        best = rv
+        if not _is_dup(rv['text']):
+            return rv
+    return best
 
+
+def _ai_unique_text(prompt, max_tokens, attempts=4, parser=None, temp_step=0.06):
+    """مثل _ai_unique_json لكن يرجع نصاً مفرداً (يدعم parser مخصص مثل parse_ai_reply)."""
+    parser = parser or (lambda out: ((extract_json(out) or {}).get('text', '') if out else ''))
+    best = ''
+    for k in range(attempts):
+        hint = '' if k == 0 else (
+            f'\n\n⚠️ المحاولة {k+1}: الرد السابق مكرر — غيّر الصياغة والبداية والكلمات كلياً.')
+        out = _ai_call(prompt + hint, max_tokens=max_tokens,
+                       temperature=min(1.0, AI_TEMPERATURE + k * temp_step))
+        text = (parser(out) or '').strip()
+        if not text:
+            continue
+        best = text
+        if not _is_dup(text):
+            return text
+    return best
+
+
+def _unique_fallback(product, persona=None, attempts=8):
+    """شبكة أمان فريدة: يكرّر محرك القوالب الضخم حتى ينتج نصاً غير مكرر."""
+    last = None
+    for _ in range(attempts):
+        rv = _fallback_single(product, persona)
+        last = rv
+        if not _is_dup(rv.get('text', '')):
+            return rv
+    return last  # احتمال نادر جداً — يُقبل بعد استنفاد المحاولات
+
+
+def _used_texts_block(limit=30):
+    """كتلة آخر النصوص المستخدمة (لمنع التكرار) — موحّدة لكل المسارات."""
+    if USE_ANTI_REPEAT:
+        return format_used_texts_block(limit=limit)
+    used = _get_used_texts(_load_archive(), limit=limit + 10)
+    return '\n'.join(f'- {t}' for t in used[-limit:]) if used else ''
+
+
+def _plan_review(persona, pf, perfumes, used_block):
+    """مرحلة (التفكير): يبني البرومبت ويحدّد النمط والتوجيه الاستراتيجي — بلا استدعاء AI.
+
+    يرجع (prompt, params) ليتمكّن المسار اللحظي من عرض «ماذا سيكتب ولماذا» قبل الكتابة.
+    """
+    cross = _build_cross_sell(pf['name'], perfumes)
+    return _make_master_prompt(persona, pf['name'], used_block, extra_block=cross)
+
+
+def _write_review(persona, pf, prompt, params):
+    """مرحلة (الكتابة): يستدعي AI لكتابة تقييم فريد مع شبكة أمان فريدة.
+
+    يضمن أن النص الناتج غير مكرر (محاولات AI متصاعدة ثم قوالب فريدة)،
+    ثم يسجّله في طبقة الجلسة. يرجع review_dict كامل الحقول.
+    """
+    rv = _ai_unique_json(prompt, max_tokens=400, attempts=4)
+
+    if rv and rv.get('text') and not _is_dup(rv['text']):
         rv['price'] = pf['price']
         rv['brand'] = pf['brand']
         rv['pg'] = pf['g']
         rv['product'] = pf['name']
         rv['pattern'] = params.get('pattern', '')
-
-        # تطبيق أخطاء إملائية إذا الشخصية تحتاج
+        # أخطاء إملائية (تزيد التفرّد ولا تنقصه)
         if USE_DIALECTS and persona.get('has_typo', False):
             rv['text'] = apply_typos(rv['text'], probability=1.0)
+    else:
+        # كل محاولات AI كانت مكررة أو فشلت → قالب فريد مضمون
+        rv = _unique_fallback(pf, persona)
+        rv['pattern'] = params.get('pattern', '')
 
-        # التحقق من التكرار — أعد التوليد بنص مختلف بدل إضافة فراغ بلا معنى
-        if USE_ANTI_REPEAT and is_duplicate(rv.get('text', '')):
-            retry = _ai_call(
-                prompt + '\n\n⚠️ تنبيه: التقييم السابق كان مكرراً. اكتب نصاً مختلفاً تماماً ببداية وكلمات مختلفة.',
-                max_tokens=400)
-            rv2 = extract_json(retry)
-            if rv2 and rv2.get('text') and not is_duplicate(rv2['text']):
-                rv['text'] = rv2['text']
-                if 'rating' in rv2:
-                    rv['rating'] = rv2['rating']
+    # تتبع النمط + تسجيل النص لمنع أي تكرار لاحق
+    if USE_AR_TRACK:
+        ar_track_pattern(params.get('pattern', 'default'))
+    _register(rv.get('text', ''))
+    return rv
 
-        # تتبع النمط لتغذية مكافحة التكرار
-        if USE_AR_TRACK:
-            ar_track_pattern(params.get('pattern', 'default'))
 
-        all_reviews.append(rv)
-
+def _ai_reviews(persona, perfumes):
+    """توليد تقييمات AI فريدة لكل عطر — يفكّر ثم يكتب (دفعة واحدة)."""
+    used_block = _used_texts_block(limit=30)
+    all_reviews = []
+    for pf in perfumes:
+        prompt, params = _plan_review(persona, pf, perfumes, used_block)
+        all_reviews.append(_write_review(persona, pf, prompt, params))
     # حفظ في الأرشيف
     _archive_batch(all_reviews, persona.get('name', ''))
     return all_reviews
 
 def _ai_single_review(persona, product):
-    """توليد تقييم واحد بالـ AI — يستخدم MASTER_PROMPT المتقدم"""
-    if USE_ANTI_REPEAT:
-        used_block = format_used_texts_block(limit=15)
-    else:
-        used = _get_used_texts(_load_archive(), limit=20)
-        used_block = '\n'.join([f'- {t}' for t in used[-15:]]) if used else ''
-
+    """توليد تقييم واحد بالـ AI — يفكّر ثم يكتب (نفس مسار التوليد الدفعي)."""
+    used_block = _used_texts_block(limit=15)
     prompt, params = _make_master_prompt(persona, product['name'], used_block)
-
-    result = _ai_call(prompt, max_tokens=300)
-    rv = extract_json(result)
-    if not rv or not rv.get('text'):
-        return _fallback_single(product, persona)
-
-    rv['product'] = product['name']
-    rv['price'] = product['price']
-    rv['brand'] = product['brand']
-    rv['pg'] = product.get('g','مشترك')
-    rv['pattern'] = params.get('pattern', '')
-    if USE_DIALECTS and persona.get('has_typo', False):
-        rv['text'] = apply_typos(rv['text'], probability=1.0)
-    if USE_AR_TRACK:
-        ar_track_pattern(params.get('pattern', 'default'))
-    _archive_review(rv['text'], product['name'], persona.get('name',''))
+    rv = _write_review(persona, product, prompt, params)
+    _archive_review(rv.get('text', ''), product['name'], persona.get('name', ''))
     return rv
 
+# جوانب متجر متنوّعة — يُختار منها جانبان عشوائياً لكل تقييم لمنع التكرار
+STORE_ASPECTS = [
+    'سرعة التوصيل', 'فخامة التغليف', 'أصالة العطور 100%', 'خدمة العملاء وسرعة الرد',
+    'الأسعار المنافسة', 'سهولة الطلب والدفع', 'العينات المجانية مع الطلب',
+    'الكرت الشخصي مع الطلب', 'التغليف المحمي ضد الكسر', 'التقسيط بتابي/تمارا',
+]
+# أساليب بداية متنوّعة لتقييم المتجر (تمنع تكرار صيغة الافتتاح)
+STORE_OPENERS = [
+    'ابدأ بانطباعك المباشر عن تجربة الشراء',
+    'ابدأ بذكر آخر طلب وصلك وكيف كان',
+    'ابدأ بمقارنة بسيطة مع متاجر ثانية تعاملت معها',
+    'ابدأ بردة فعلك أول ما فتحت الطلب',
+    'ابدأ بنصيحة لغيرك يطلب من المتجر',
+]
+
+
 def _ai_store_review(persona):
-    """تقييم متجر بالـ AI"""
-    prompt = f"""اكتب تقييم قصير (10-20 كلمة) لمتجر "مهووس للعطور" بلهجة سعودية عامية.
+    """تقييم متجر متنوّع وغير مكرر — يدوّر الجوانب والبداية ويمنع التكرار."""
+    aspects = random.sample(STORE_ASPECTS, k=2)
+    opener = random.choice(STORE_OPENERS)
+    used_block = _used_texts_block(limit=15)
+    prompt = f"""اكتب تقييم قصير (8-16 كلمة) لمتجر "مهووس للعطور" بلهجة سعودية عامية.
 العميل: {persona['name']}، {persona['label']}، عمره {persona['age']}، من {persona['city']}.
-اذكر شي مثل: التوصيل، التغليف، الأصالة، خدمة العملاء.
+## ركّز على هذين الجانبين تحديداً (لا غيرهما): {aspects[0]} و{aspects[1]}.
+## قواعد:
+- {opener}
+- لا تبدأ بكلمة "متجر" ولا بنفس الصيغ الجاهزة الشائعة
+- لهجة سعودية عفوية، بدون فصحى
+- لا تكرر أياً من هذه الصياغات السابقة:
+{used_block if used_block else '(لا يوجد سابق)'}
 أرجع JSON فقط: {{"rating": 5, "text": "..."}}"""
-    result = _ai_call(prompt, max_tokens=200)
-    rv = extract_json(result)
-    if rv and rv.get('text'):
+    rv = _ai_unique_json(prompt, max_tokens=200, attempts=4)
+    if rv and rv.get('text') and not _is_dup(rv['text']):
+        _register(rv['text'])
+        if USE_ANTI_REPEAT:
+            try:
+                ar_archive_review(rv['text'], 'متجر مهووس', persona.get('name', ''))
+            except Exception:
+                pass
         return rv
-    return {'rating':5,'text':'متجر ممتاز والعطور أصلية والتوصيل سريع'}
+    # شبكة أمان فريدة: اختر من المجموعة نصاً غير مستخدم
+    pool = list(STORE_REVIEWS.get(5, ['متجر ممتاز والعطور أصلية والتوصيل سريع']))
+    random.shuffle(pool)
+    for t in pool:
+        if not _is_dup(t):
+            _register(t)
+            return {'rating': 5, 'text': t}
+    # نادر: كل المجموعة مستخدمة — اقبل آخر ناتج AI إن وُجد وإلا واحداً من المجموعة
+    t = (rv.get('text') if rv else None) or random.choice(pool)
+    _register(t)
+    return {'rating': 5, 'text': t}
 
 # ═══════════ Fallback بدون AI ═══════════
 FALLBACK_M = [
@@ -881,39 +976,80 @@ from flask import Response, stream_with_context
 @app.route('/api/generate-stream', methods=['POST'])
 @rate_limit(RATE_LIMIT_GENERATE)
 def api_generate_stream():
-    """توليد شخصية + تقييمات مع بث مباشر لخطوات الـ API (SSE)"""
+    """توليد لحظي حقيقي: يختار العطور → يفكّر → يكتب أمام المستخدم خطوة بخطوة (SSE).
+
+    خلافاً للنسخة القديمة (تولّد كل شيء ثم تعيد تمثيل الخطوات)، هنا كل حدث
+    يُبثّ فور حدوثه فعلاً: استدعاء AI لكل عطر يتم داخل الحلقة ويُعرض ناتجه مباشرة.
+    """
     def _sse(evt):
         return f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
 
     def generate():
         try:
-            yield _sse({'step': 'persona', 'msg': 'اختيار الشخصية...', 'icon': '👤'})
-            data = _gen_one()
-            persona = data.get('persona', {})
-            p_name = persona.get('name', '')
-            p_label = persona.get('label', '')
-            p_city = persona.get('city', '')
-            yield _sse({'step': 'persona_done', 'msg': f'الشخصية: {p_name} — {p_label} — {p_city}', 'icon': '✅'})
+            # ── 1) اختيار الشخصية ──
+            yield _sse({'step': 'persona', 'msg': 'يختار الشخصية المناسبة...', 'icon': '👤'})
+            if USE_NEW_PERSONAS:
+                persona = generate_persona()
+                arch = next((a for a in ARCHETYPES if a['id'] == persona['archId']),
+                            random.choice(ARCHETYPES))
+            else:
+                arch = random.choice(ARCHETYPES)
+                city = _city()
+                persona = {
+                    'name': _name(arch['g']), 'city': city, 'gender': arch['g'],
+                    'age': random.randint(*arch['age']), 'label': arch['label'],
+                    'emoji': arch['emoji'], 'archId': arch['id'],
+                    'address': _national_address(city), 'phone': _phone(),
+                }
+            yield _sse({'step': 'persona_done', 'icon': '✅',
+                        'msg': f"الشخصية: {persona['name']} — {persona['label']} — {persona['city']}",
+                        'persona': persona})
 
-            perfumes = data.get('perfumes', [])
-            yield _sse({'step': 'products', 'msg': f'المنتجات: {len(perfumes)} عطور', 'icon': '📦'})
+            # ── 2) اختيار العطور (منظّم: موزون بالترند وتفضيلات الشخصية ونطاق سعرها) ──
+            yield _sse({'step': 'products', 'icon': '📦',
+                        'msg': 'يختار عطوراً تناسب الشخصية (ترجيح ذكي لا عشوائي)...'})
+            perfumes = _pick_products(arch)
+            yield _sse({'step': 'products_done', 'icon': '✅',
+                        'msg': f'اختار {len(perfumes)} عطور',
+                        'perfumes': [{'name': p['name'], 'price': p['price'],
+                                      'brand': p.get('brand', '')} for p in perfumes]})
 
-            reviews = data.get('reviews', [])
-            for i, rv in enumerate(reviews, 1):
-                pattern = rv.get('pattern', 'unknown')
+            # ── 3) لكل عطر: يفكّر (نمط + توجيه استراتيجي) ثم يكتب لحظياً ──
+            used_block = _used_texts_block(limit=30)
+            reviews = []
+            for i, pf in enumerate(perfumes, 1):
+                # (أ) التفكير — يُبنى البرومبت ويُحدَّد النمط قبل الكتابة
+                prompt, params = _plan_review(persona, pf, perfumes, used_block)
+                pattern = params.get('pattern', '')
                 directive = get_ai_directive(pattern) if USE_PATTERNS else ''
-                yield _sse({
-                    'step': 'review', 'index': i,
-                    'msg': f'تقييم #{i}: نمط {pattern}', 'icon': '🎯',
-                    'directive': directive[:100],
-                    'text': rv.get('text', '')[:150],
-                    'rating': rv.get('rating', 5),
-                })
+                desc = get_pattern_description(pattern) if USE_PATTERNS else ''
+                yield _sse({'step': 'thinking', 'index': i, 'icon': '🧠',
+                            'product': pf['name'],
+                            'msg': f"يفكّر في «{pf['name']}» — النمط: {desc or pattern}",
+                            'pattern': pattern, 'directive': directive[:160]})
 
-            store = data.get('store', {})
-            yield _sse({'step': 'store', 'msg': 'تقييم المتجر', 'icon': '🏪', 'text': store.get('text', '')[:100]})
+                # (ب) الكتابة — استدعاء AI فعلي الآن وعرض الناتج مباشرة
+                rv = _write_review(persona, pf, prompt, params)
+                reviews.append(rv)
+                yield _sse({'step': 'review', 'index': i, 'icon': '✍️',
+                            'product': pf['name'],
+                            'msg': f"كتب تقييم «{pf['name']}»",
+                            'text': rv.get('text', ''), 'rating': rv.get('rating', 5),
+                            'pattern': rv.get('pattern', pattern)})
 
-            yield _sse({'step': 'done', 'msg': 'اكتمل!', 'icon': '✅', 'data': data})
+            # حفظ الدفعة في الأرشيف (مرة واحدة بعد اكتمالها)
+            _archive_batch(reviews, persona.get('name', ''))
+
+            # ── 4) تقييم المتجر (متغيّر وغير مكرر) ──
+            yield _sse({'step': 'store', 'icon': '🏪', 'msg': 'يكتب تقييماً عاماً للمتجر...'})
+            store = _ai_store_review(persona)
+            yield _sse({'step': 'store_done', 'icon': '✅', 'msg': 'كتب تقييم المتجر',
+                        'text': store.get('text', ''), 'rating': store.get('rating', 5)})
+
+            # ── 5) اكتمل — البيانات الكاملة للواجهة ──
+            data = {'persona': persona, 'perfumes': perfumes,
+                    'reviews': reviews, 'store': store}
+            yield _sse({'step': 'done', 'icon': '🎉', 'msg': 'اكتمل التوليد!', 'data': data})
 
         except Exception as e:
             yield _sse({'step': 'error', 'msg': str(e), 'icon': '❌'})
@@ -928,6 +1064,24 @@ def api_generate_stream():
 # ═══════════════════════════════════════════════════════════
 # Thread Generation — توليد محادثات (تقييم + ردود)
 # ═══════════════════════════════════════════════════════════
+
+# مجموعة ردود احتياطية متنوّعة (بدل '👍' المتكرر) — تُختار بلا تكرار
+THREAD_FALLBACKS = [
+    'إي صح كلامك', 'توني أطلبه', 'يعطيك العافية على المعلومة', 'نفس رأيي تماماً',
+    'شكراً للتوضيح', 'جربته وعجبني', 'الله يعطيك العافية', 'كلامك سليم 100%',
+    'وأنا أؤكد كلامك', 'فدتني، مشكور', 'بطلبه بسبب كلامك', 'أتفق معك',
+]
+
+
+def _unique_thread_fallback():
+    """رد احتياطي فريد من المجموعة (يتجنّب التكرار قدر الإمكان)."""
+    pool = list(THREAD_FALLBACKS)
+    random.shuffle(pool)
+    for t in pool:
+        if not _is_dup(t):
+            return t
+    return random.choice(pool)
+
 
 @app.route('/api/generate-thread', methods=['POST'])
 @rate_limit(RATE_LIMIT_GENERATE)
@@ -948,13 +1102,14 @@ def api_generate_thread():
     # بناء بيانات المحادثة (برومبتات فقط)
     thread_data = generate_thread_data(product_name, main_review, reply_count)
 
-    # استدعاء الـ AI لكل رد
+    # استدعاء الـ AI لكل رد — كل رد فريد لا يتكرر
     thread_replies = []
     for reply_info in thread_data['replies']:
-        ai_result = _ai_call(reply_info['prompt'], max_tokens=150, temperature=0.9)
-        text = parse_ai_reply(ai_result)
-        if not text:
-            text = '👍'  # fallback بسيط
+        text = _ai_unique_text(reply_info['prompt'], max_tokens=150,
+                               attempts=3, parser=parse_ai_reply)
+        if not text or _is_dup(text):
+            text = _unique_thread_fallback()
+        _register(text)
         thread_replies.append({
             'name': reply_info['persona'].get('name', 'عميل'),
             'city': reply_info['persona'].get('city', ''),
