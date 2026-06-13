@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-محرك الشخصيات العميقة — Deep Persona Engine
+محرك الشخصيات العميقة — Deep Persona Engine V2
 كل شخصية بـ 7 أبعاد: mood, expertise, writing_style, mention_product, use_emoji, has_typo, dialect
+V2: ai_directive injection + product data + review banks + enhanced directives
 """
 import random
 import json
@@ -30,12 +31,65 @@ except ImportError:
 
 # import الأنماط
 try:
-    from review_patterns import pick_pattern, pick_rating, get_pattern_description, get_low_rating_reason
+    from review_patterns import (pick_pattern, pick_rating, get_pattern_description,
+                                  get_low_rating_reason, get_ai_directive, REVIEW_PATTERNS)
+    _HAS_PATTERNS_V2 = True
 except ImportError:
     def pick_pattern(u=None): return 'ultra_short'
     def pick_rating(): return 5
     def get_pattern_description(p): return 'كلمة أو كلمتين فقط (1-3 كلمة)'
     def get_low_rating_reason(r): return ''
+    def get_ai_directive(p): return ''
+    REVIEW_PATTERNS = {}
+    _HAS_PATTERNS_V2 = False
+
+# import بنوك التقييمات كمرجع للأسلوب
+try:
+    from real_reviews_bank import pick_review_exemplars as bank_pick_exemplars
+    _HAS_REVIEW_BANK = True
+except ImportError:
+    _HAS_REVIEW_BANK = False
+    def bank_pick_exemplars(gender='male', pattern=None, count=3, used_texts=None): return []
+
+try:
+    from short_texts_bank import pick_short_text
+    _HAS_SHORT_BANK = True
+except ImportError:
+    _HAS_SHORT_BANK = False
+
+# ═══════════════════════════════════════════════════════════
+#  تحميل بيانات المنتجات المُثرية (مكونات + عائلة عطرية)
+# ═══════════════════════════════════════════════════════════
+
+_CATALOG_INDEX = {}  # name → {scent_family, ingredients, category}
+
+
+def _index_catalog(products):
+    """بناء فهرس المنتجات (name → بيانات مُثرية) من قائمة منتجات."""
+    _CATALOG_INDEX.clear()
+    for _prod in products:
+        _CATALOG_INDEX[_prod.get('name', '')] = {
+            'scent_family': _prod.get('scent_family', ''),
+            'ingredients': _prod.get('ingredients', ''),
+            'category': _prod.get('category', ''),
+            'brand': _prod.get('brand', ''),
+        }
+    return len(_CATALOG_INDEX)
+
+
+def set_catalog(products):
+    """حقن الكتالوج من مصدر خارجي (مثل app.py) لتفادي قراءة الملف مرتين."""
+    return _index_catalog(products)
+
+
+# تحميل افتراضي من الملف — يُستبدل لاحقاً عبر set_catalog() إن استدعاه app.py
+try:
+    _catalog_path = BASE_DIR / 'catalog.json'
+    if _catalog_path.exists():
+        with open(_catalog_path, 'r', encoding='utf-8') as _cf:
+            _index_catalog(json.load(_cf))
+except Exception:
+    pass
 
 # ═══════════════════════════════════════════════════════════
 #  الشخصيات الأساسية (من app.py الأصلي — لا تتغير)
@@ -134,6 +188,7 @@ PERSONA_FOCUS = {
 # ═══════════════════════════════════════════════════════════
 #  بنك تقييمات عملاء حقيقية (نمط واقعي) — يُحقن كأمثلة تعليمية
 #  لتعليم الـ AI أسلوب العملاء الفعلي: عفوية، نواقص، بدايات متنوعة
+#  V2: يدمج البنك الخارجي (312+ تقييم) إن توفّر
 # ═══════════════════════════════════════════════════════════
 
 REAL_REVIEW_EXEMPLARS = [
@@ -160,10 +215,47 @@ REAL_REVIEW_EXEMPLARS = [
 ]
 
 
-def pick_real_exemplars(count=3):
-    """اختيار أمثلة تقييمات حقيقية لحقنها في البرومبت كمرجع أسلوب"""
-    k = min(count, len(REAL_REVIEW_EXEMPLARS))
-    return random.sample(REAL_REVIEW_EXEMPLARS, k)
+def pick_real_exemplars(count=3, gender='male'):
+    """اختيار أمثلة تقييمات حقيقية لحقنها في البرومبت كمرجع أسلوب.
+
+    V2: يستخدم البنك الخارجي (312+ تقييم) إن توفّر، ثم يكمل من المحلي.
+    """
+    exemplars = []
+    # أولاً: جلب من البنك الخارجي الغني
+    if _HAS_REVIEW_BANK:
+        try:
+            bank_samples = bank_pick_exemplars(gender=gender, count=min(count, 2))
+            exemplars.extend(bank_samples)
+        except Exception:
+            pass
+    # ثانياً: إكمال من البنك المحلي
+    remaining = count - len(exemplars)
+    if remaining > 0:
+        k = min(remaining, len(REAL_REVIEW_EXEMPLARS))
+        exemplars.extend(random.sample(REAL_REVIEW_EXEMPLARS, k))
+    return exemplars[:count]
+
+
+def _get_product_data(product_name):
+    """جلب بيانات المنتج المُثرية (مكونات + عائلة عطرية) من الكتالوج."""
+    data = _CATALOG_INDEX.get(product_name, {})
+    if not data:
+        return ''
+    parts = []
+    if data.get('scent_family'):
+        family_map = {
+            'oud': 'عائلة العود', 'oriental': 'عائلة شرقية',
+            'woody': 'عائلة خشبية', 'floral': 'عائلة زهرية',
+            'fresh': 'عائلة منعشة', 'musk': 'عائلة المسك',
+            'citrus': 'عائلة حمضية', 'sweet': 'عائلة حلوة',
+            'gourmand': 'عائلة حلويات', 'leather': 'عائلة جلدية',
+        }
+        parts.append(f'العائلة: {family_map.get(data["scent_family"], data["scent_family"])}')
+    if data.get('ingredients'):
+        parts.append(f'المكونات: {data["ingredients"]}')
+    if data.get('brand'):
+        parts.append(f'البراند: {data["brand"]}')
+    return '\n'.join(f'- {p}' for p in parts)
 
 # ═══════════════════════════════════════════════════════════
 #  SEO — حصان طروادة (مقارنة بعطور عالمية غالية) + كلمات بحث طويلة
@@ -501,7 +593,12 @@ def generate_review_params(persona):
 
 
 # ═══════════════════════════════════════════════════════════
-#  MASTER PROMPT — البرومبت المتقدم
+#  MASTER PROMPT V2 — البرومبت المتقدم مع التوجيه الاستراتيجي
+#  التغييرات عن V1:
+#  1. حقن ai_directive (التوجيه الاستراتيجي للنمط)
+#  2. حقن بيانات المنتج (مكونات + عائلة عطرية)
+#  3. حقن نماذج من البنوك كأمثلة أسلوبية
+#  4. الـ AI يتلقى "مهمة" لا مجرد وصف نمط
 # ═══════════════════════════════════════════════════════════
 
 MASTER_PROMPT = """أنت {persona_name}، {persona_label}، عمرك {age}، من {city}.
@@ -515,10 +612,12 @@ MASTER_PROMPT = """أنت {persona_name}، {persona_label}، عمرك {age}، م
 {dialect_examples}
 ## هكذا يكتب عملاء حقيقيون (احتذِ الأسلوب لا الكلمات — عفوية، نواقص بسيطة، بدايات متنوعة):
 {real_examples}
-## المطلوب:
-اكتب تقييم واحد فقط كأنك فعلاً اشتريت هذا المنتج، بصوتك أنت وحسب اللي يهمك.
+## بيانات المنتج (استخدمها لتوجيه إحساسك، لا تسرد المكونات):
 المنتج: {product_name}
-النمط المطلوب: {pattern_description}
+{product_data}
+## مهمتك الاستراتيجية:
+{ai_directive}
+## النمط: {pattern_description}
 {directives_block}
 ## قواعد صارمة:
 - الطول: {min_words}-{max_words} كلمة فقط
@@ -531,6 +630,7 @@ MASTER_PROMPT = """أنت {persona_name}، {persona_label}، عمرك {age}، م
 - لا تكتب بفصحى أو لغة رسمية
 - لا تبدأ بـ "لقد" أو "إن" أو "يعد" أو "هذا المنتج"
 - لا تبدأ التقييم باسم المنتج إطلاقاً — ابدأ بإحساسك أو رأيك أو موقفك
+- لا تسرد المكونات العطرية بالاسم — عبّر عن إحساسك بها (مثلاً: بدل "يحتوي ليمون" قُل "انتعاش")
 - لا تضع نقاط bullet أو قوائم مرقمة
 - لا تكرر هذه الصياغات السابقة:
 {used_texts_block}
@@ -564,34 +664,50 @@ MENTION_STYLES = [
 
 
 def build_master_prompt(persona, product_name, review_params, used_texts_block='', extra_block=''):
-    """بناء البرومبت المتقدم.
+    """بناء البرومبت المتقدم V2.
 
-    extra_block: توجيهات إضافية يبنيها المستدعي (مثل Cross-Sell من app.py).
+    التطويرات عن V1:
+    - ai_directive: التوجيه الاستراتيجي من النمط (المهمة النفسية/التسويقية)
+    - product_data: مكونات + عائلة عطرية من الكتالوج المُثرى
+    - review bank exemplars: نماذج من البنك الخارجي (312+ تقييم)
+    - extra_block: توجيهات إضافية يبنيها المستدعي (مثل Cross-Sell)
     """
-    from review_patterns import REVIEW_PATTERNS
-    
-    pattern_info = REVIEW_PATTERNS.get(review_params['pattern'], REVIEW_PATTERNS['ultra_short'])
-    min_words, max_words = pattern_info['words']
-    
-    # قواعد خاصة — تنويع ذكر الاسم وموضعه (لا يكون أول الكلام)
+    # --- جلب بيانات النمط ---
+    pattern_info = REVIEW_PATTERNS.get(review_params['pattern'],
+                                       REVIEW_PATTERNS.get('ultra_short', {'words': (1, 3)}))
+    min_words, max_words = pattern_info.get('words', (1, 3))
+
+    # --- التوجيه الاستراتيجي من النمط (المفتاح الجديد!) ---
+    ai_directive = get_ai_directive(review_params['pattern'])
+    if not ai_directive:
+        ai_directive = f'اكتب تقييماً عفوياً وصادقاً عن تجربتك مع هذا العطر ({review_params.get("pattern_desc", "")})'
+
+    # --- بيانات المنتج المُثرية ---
+    product_data = _get_product_data(product_name)
+    if not product_data:
+        product_data = '(لا تتوفر بيانات إضافية — اكتب عن إحساسك العام)'
+
+    # --- قواعد خاصة — تنويع ذكر الاسم وموضعه ---
     mention_rule = 'لا تذكر اسم المنتج' if not persona['mention_product'] else random.choice(MENTION_STYLES)
-    # نمط "عن الريحة بدون ذكر الاسم" يفرض عدم ذكر الاسم بغض النظر عن تفضيل الشخصية
     if review_params['pattern'] == 'scent_no_name':
         mention_rule = 'لا تذكر اسم المنتج إطلاقاً — صف الريحة فقط'
 
-    # تنويع البداية في كل تقييم
+    # --- تنويع البداية ---
     opening_rule = random.choice(OPENING_STYLES)
     emoji_rule = 'بدون إيموجي نهائياً' if not persona['use_emoji'] else 'إيموجي واحد فقط'
     typo_rule = 'أضف خطأ إملائي طبيعي واحد' if persona['has_typo'] else 'بدون أخطاء إملائية'
     rating_note = '— اذكر سبب بسيط للنقص' if review_params['rating'] <= 3 else ''
-    
+
     dialect_examples = get_dialect_examples(persona['dialect'], count=4)
 
-    # تركيز الشخصية + أمثلة عملاء حقيقية
+    # --- تركيز الشخصية ---
     persona_focus = PERSONA_FOCUS.get(persona.get('archId', ''), 'يهمك تكتب رأيك الصادق بعفوية')
-    real_examples = '\n'.join(f'- {ex}' for ex in pick_real_exemplars(3))
 
-    # كتلة التوجيهات الموحّدة: SEO + ربط زمني/موسمي + توجيهات المستدعي (Cross-Sell)
+    # --- أمثلة عملاء حقيقية (V2: من البنك الخارجي + المحلي) ---
+    gender = persona.get('gender', 'male')
+    real_examples = '\n'.join(f'- {ex}' for ex in pick_real_exemplars(3, gender=gender))
+
+    # --- كتلة التوجيهات الموحّدة ---
     seo_block = build_seo_block(persona, review_params['pattern'], max_words=max_words)
     temporal_block = build_temporal_block() if max_words >= 6 else ''
     directives_block = '\n'.join(b for b in (seo_block, temporal_block, extra_block) if b)
@@ -609,6 +725,8 @@ def build_master_prompt(persona, product_name, review_params, used_texts_block='
         dialect_examples=dialect_examples,
         real_examples=real_examples,
         product_name=product_name,
+        product_data=product_data,
+        ai_directive=ai_directive,
         pattern_description=review_params['pattern_desc'],
         directives_block=directives_block,
         min_words=min_words,
@@ -621,7 +739,7 @@ def build_master_prompt(persona, product_name, review_params, used_texts_block='
         rating_note=rating_note,
         used_texts_block=used_texts_block if used_texts_block else '(لا يوجد سابق)',
     )
-    
+
     return prompt
 
 

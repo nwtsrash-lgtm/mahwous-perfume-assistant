@@ -16,8 +16,49 @@ from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)
+# CORS مقيّد على نطاقات متجرك — اضبط ALLOWED_ORIGINS في البيئة (مفصولة بفواصل).
+# الافتراضي '*' للتطوير المحلي فقط؛ في الإنتاج ضع نطاقك الفعلي.
+_ALLOWED_ORIGINS = [o.strip() for o in os.environ.get('ALLOWED_ORIGINS', '*').split(',') if o.strip()]
+CORS(app, resources={r"/api/*": {"origins": _ALLOWED_ORIGINS}})
 BASE_DIR = Path(__file__).parent
+
+
+def _safe_int(value, default, lo, hi):
+    """تحويل آمن لعدد صحيح من مدخل غير موثوق مع تقييده ضمن [lo, hi]."""
+    try:
+        return max(lo, min(int(value), hi))
+    except (TypeError, ValueError):
+        return default
+
+# ═══════════════════════════════════════════════════════════
+# Rate limiting — حماية endpoints الذكاء الاصطناعي من الإساءة/استنزاف رصيد OpenRouter.
+# اختياري وآمن: إن لم تكن flask-limiter مثبّتة يصبح rate_limit ديكوريتر بلا أثر،
+# فلا يكسر التطوير المحلي. في الإنتاج تُثبَّت تلقائياً من requirements.txt.
+# تُضبط الحدود عبر متغيرات البيئة (RATE_LIMIT_DEFAULT / RATE_LIMIT_GENERATE).
+# ═══════════════════════════════════════════════════════════
+RATE_LIMIT_GENERATE = os.environ.get('RATE_LIMIT_GENERATE', '20 per minute')
+try:
+    from flask_limiter import Limiter
+    from flask_limiter.util import get_remote_address
+    _limiter = Limiter(
+        key_func=get_remote_address,
+        app=app,
+        default_limits=[os.environ.get('RATE_LIMIT_DEFAULT', '300 per hour')],
+        storage_uri=os.environ.get('RATE_LIMIT_STORAGE', 'memory://'),
+    )
+
+    def rate_limit(rule):
+        return _limiter.limit(rule)
+    USE_RATE_LIMIT = True
+    print('✅ flask-limiter loaded (rate limiting active: %s)' % RATE_LIMIT_GENERATE)
+except Exception as _e:
+    USE_RATE_LIMIT = False
+
+    def rate_limit(rule):
+        def _decorator(fn):
+            return fn
+        return _decorator
+    print('⚠️ flask-limiter not active (%s) — endpoints unthrottled' % _e)
 
 # المسار الثابت للبيانات المؤقتة — Railway يضبطه على /data (Persistent Volume).
 # يبقى بين عمليات النشر. الكود والبيانات الثابتة (catalog/names/.env) تبقى في BASE_DIR.
@@ -28,7 +69,8 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 # استيراد المحركات الجديدة (مع fallback آمن)
 # ═══════════════════════════════════════════════════════════
 try:
-    from personas_engine import generate_persona, generate_review_params, build_master_prompt, ARCHETYPES as NEW_ARCHETYPES
+    from personas_engine import (generate_persona, generate_review_params, build_master_prompt,
+                                  set_catalog as pe_set_catalog, ARCHETYPES as NEW_ARCHETYPES)
     USE_NEW_PERSONAS = True
     print('\u2705 personas_engine loaded')
 except ImportError:
@@ -44,9 +86,9 @@ except ImportError:
     print('\u26a0\ufe0f dialects not found')
 
 try:
-    from review_patterns import pick_pattern, pick_rating, get_pattern_description, REVIEW_PATTERNS, RATING_DISTRIBUTION
+    from review_patterns import (get_ai_directive, REVIEW_PATTERNS, PATTERN_CATEGORIES)
     USE_PATTERNS = True
-    print('\u2705 review_patterns loaded')
+    print('\u2705 review_patterns V2 loaded (%d patterns, %d categories)' % (len(REVIEW_PATTERNS), len(PATTERN_CATEGORIES)))
 except ImportError:
     USE_PATTERNS = False
     print('\u26a0\ufe0f review_patterns not found')
@@ -68,6 +110,14 @@ try:
 except ImportError:
     USE_TRENDING = False
     print('\u26a0\ufe0f trending not found')
+
+try:
+    from thread_generator import generate_thread_data, parse_ai_reply, format_thread_for_display
+    USE_THREADS = True
+    print('\u2705 thread_generator loaded')
+except ImportError:
+    USE_THREADS = False
+    print('\u26a0\ufe0f thread_generator not found')
 
 # \u062f\u0648\u0627\u0644 \u062a\u062a\u0628\u0639 \u0627\u0644\u062a\u0643\u0631\u0627\u0631 (\u0623\u0646\u0645\u0627\u0637 + \u0635\u0641\u0627\u062a) \u2014 \u062a\u064f\u0633\u062a\u062f\u0639\u0649 \u0628\u0639\u062f \u0643\u0644 \u062a\u0648\u0644\u064a\u062f AI \u0646\u0627\u062c\u062d
 try:
@@ -520,6 +570,12 @@ ARCHETYPES = [
 # ═══════════ الكتالوج الكامل من ملف المتجر ═══════════
 with open(BASE_DIR / 'catalog.json', 'r', encoding='utf-8') as f:
     PRODUCTS = json.load(f)
+# مصدر واحد للحقيقة: نُمرّر نفس القائمة لفهرس personas_engine بدل قراءة الملف مرتين
+if USE_NEW_PERSONAS:
+    try:
+        pe_set_catalog(PRODUCTS)
+    except Exception as _e:
+        print(f'⚠️ set_catalog failed: {_e}')
 print(f'📦 الكتالوج: {len(PRODUCTS)} منتج ({sum(1 for p in PRODUCTS if p["g"]=="رجالي")} رجالي | {sum(1 for p in PRODUCTS if p["g"]=="نسائي")} نسائي | {sum(1 for p in PRODUCTS if p["g"]=="مشترك")} مشترك)')
 
 # ═══════════ براندات ترند — الأكثر مبيعاً في السعودية ═══════════
@@ -678,6 +734,7 @@ def health():
             'anti_repeat': USE_ANTI_REPEAT,
             'trending': USE_TRENDING,
             'intel': USE_INTEL,
+            'rate_limit': USE_RATE_LIMIT,
         },
         'products': len(PRODUCTS),
         'archive': len(_load_archive().get('reviews', [])),
@@ -685,15 +742,18 @@ def health():
     })
 
 @app.route('/api/generate', methods=['POST'])
+@rate_limit(RATE_LIMIT_GENERATE)
 def generate(): return jsonify(_gen_one())
 
 @app.route('/api/batch', methods=['POST'])
+@rate_limit(RATE_LIMIT_GENERATE)
 def batch():
-    n = min(int((request.get_json(silent=True) or {}).get('count', 5)), 20)
+    n = _safe_int((request.get_json(silent=True) or {}).get('count', 5), 5, 1, 20)
     results = [_gen_one() for _ in range(n)]
     return jsonify({'results': results, 'count': n})
 
 @app.route('/api/regen-review', methods=['POST'])
+@rate_limit(RATE_LIMIT_GENERATE)
 def regen_review():
     d = request.get_json(silent=True) or {}
     arch = next((a for a in ARCHETYPES if a['id']==d.get('archId','')), random.choice(ARCHETYPES))
@@ -703,6 +763,7 @@ def regen_review():
     return jsonify(rv)
 
 @app.route('/api/add-perfumes', methods=['POST'])
+@rate_limit(RATE_LIMIT_GENERATE)
 def add_perfumes():
     d = request.get_json(silent=True) or {}
     arch = next((a for a in ARCHETYPES if a['id']==d.get('archId','')), random.choice(ARCHETYPES))
@@ -811,17 +872,120 @@ def api_intel_refresh():
     result = intel_refresh()
     return jsonify(result)
 
+# ═══════════════════════════════════════════════════════════
+# SSE — مؤشر مباشر لعمل الـ API (Server-Sent Events)
+# ═══════════════════════════════════════════════════════════
+
+from flask import Response, stream_with_context
+
+@app.route('/api/generate-stream', methods=['POST'])
+@rate_limit(RATE_LIMIT_GENERATE)
+def api_generate_stream():
+    """توليد شخصية + تقييمات مع بث مباشر لخطوات الـ API (SSE)"""
+    def _sse(evt):
+        return f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
+
+    def generate():
+        try:
+            yield _sse({'step': 'persona', 'msg': 'اختيار الشخصية...', 'icon': '👤'})
+            data = _gen_one()
+            persona = data.get('persona', {})
+            p_name = persona.get('name', '')
+            p_label = persona.get('label', '')
+            p_city = persona.get('city', '')
+            yield _sse({'step': 'persona_done', 'msg': f'الشخصية: {p_name} — {p_label} — {p_city}', 'icon': '✅'})
+
+            perfumes = data.get('perfumes', [])
+            yield _sse({'step': 'products', 'msg': f'المنتجات: {len(perfumes)} عطور', 'icon': '📦'})
+
+            reviews = data.get('reviews', [])
+            for i, rv in enumerate(reviews, 1):
+                pattern = rv.get('pattern', 'unknown')
+                directive = get_ai_directive(pattern) if USE_PATTERNS else ''
+                yield _sse({
+                    'step': 'review', 'index': i,
+                    'msg': f'تقييم #{i}: نمط {pattern}', 'icon': '🎯',
+                    'directive': directive[:100],
+                    'text': rv.get('text', '')[:150],
+                    'rating': rv.get('rating', 5),
+                })
+
+            store = data.get('store', {})
+            yield _sse({'step': 'store', 'msg': 'تقييم المتجر', 'icon': '🏪', 'text': store.get('text', '')[:100]})
+
+            yield _sse({'step': 'done', 'msg': 'اكتمل!', 'icon': '✅', 'data': data})
+
+        except Exception as e:
+            yield _sse({'step': 'error', 'msg': str(e), 'icon': '❌'})
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
+    )
+
+
+# ═══════════════════════════════════════════════════════════
+# Thread Generation — توليد محادثات (تقييم + ردود)
+# ═══════════════════════════════════════════════════════════
+
+@app.route('/api/generate-thread', methods=['POST'])
+@rate_limit(RATE_LIMIT_GENERATE)
+def api_generate_thread():
+    """توليد محادثة: تقييم رئيسي + ردود من عملاء آخرين"""
+    if not USE_THREADS:
+        return jsonify({'error': 'thread_generator not available'}), 503
+
+    body = request.get_json(silent=True) or {}
+    product_name = body.get('product_name', '')
+    main_review = body.get('main_review', '')
+
+    if not product_name or not main_review:
+        return jsonify({'error': 'product_name and main_review required'}), 400
+
+    reply_count = _safe_int(body.get('reply_count', 2), 2, 1, 4)
+
+    # بناء بيانات المحادثة (برومبتات فقط)
+    thread_data = generate_thread_data(product_name, main_review, reply_count)
+
+    # استدعاء الـ AI لكل رد
+    thread_replies = []
+    for reply_info in thread_data['replies']:
+        ai_result = _ai_call(reply_info['prompt'], max_tokens=150, temperature=0.9)
+        text = parse_ai_reply(ai_result)
+        if not text:
+            text = '👍'  # fallback بسيط
+        thread_replies.append({
+            'name': reply_info['persona'].get('name', 'عميل'),
+            'city': reply_info['persona'].get('city', ''),
+            'text': text,
+            'type': reply_info['type'],
+            'is_answer': reply_info.get('is_answer', False),
+        })
+
+    return jsonify({
+        'thread_type': thread_data['thread_type'],
+        'main_review': main_review,
+        'product_name': product_name,
+        'replies': thread_replies,
+    })
+
+
 if __name__ == '__main__':
     arc = _load_archive()
     print('='*50)
-    print('Perfume Assistant - AI Mode (Railway)')
+    print('Perfume Assistant V2 — AI Mode (Railway)')
     print(f'   DATA_DIR: {DATA_DIR}')
     print(f'   Products: {len(PRODUCTS)}')
     print(f'   Archive: {len(arc.get("reviews",[]))} reviews (max 200 FIFO)')
     print(f'   Engines: P={USE_NEW_PERSONAS} D={USE_DIALECTS} R={USE_PATTERNS}')
     print(f'            A={USE_ANTI_REPEAT} T={USE_TRENDING} I={USE_INTEL}')
+    print(f'            Threads={USE_THREADS}')
+    if USE_PATTERNS:
+        print(f'   Patterns: {len(REVIEW_PATTERNS)} in {len(PATTERN_CATEGORIES)} categories')
     print(f'   AI: {AI_MODEL}')
     print(f'   AI_KEY: {"***" + AI_KEY[-6:] if AI_KEY else "MISSING!"}')
     print('='*50)
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
+
