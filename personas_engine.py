@@ -772,11 +772,12 @@ def build_master_prompt(persona, product_name, review_params, used_texts_block='
         real_examples = '\n'.join(f'- {ex}' for ex in pick_real_exemplars(3, gender=gender))
 
     # --- كتلة التوجيهات الموحّدة ---
-    # الأنماط القصيرة (≤6 كلمات) لا تتحمّل توجيهات إضافية تطيلها (SEO/زمني/cross-sell)
+    # الأنماط القصيرة (≤6 كلمات) لا تتحمّل توجيهات إضافية تطيلها (SEO/زمني)
     seo_block = build_seo_block(persona, review_params['pattern'], max_words=max_words)
     temporal_block = build_temporal_block() if max_words >= 6 else ''
-    _extra = extra_block if max_words >= 8 else ''
-    directives_block = '\n'.join(b for b in (seo_block, temporal_block, _extra) if b)
+    
+    # extra_block يحتوي على التنبيهات السياقية الهامة جداً (مكياج/هدايا) فلا يجوز حذفه!
+    directives_block = '\n'.join(b for b in (seo_block, temporal_block, extra_block) if b)
 
     prompt = MASTER_PROMPT.format(
         persona_name=persona['name'],

@@ -474,6 +474,33 @@ def _plan_review(persona, pf, perfumes, used_block):
     يرجع (prompt, params) ليتمكّن المسار اللحظي من عرض «ماذا سيكتب ولماذا» قبل الكتابة.
     """
     cross = _build_cross_sell(pf['name'], perfumes)
+    
+    context_hints = []
+    
+    ptype = pf.get('product_type', 'عطر')
+    if ptype == 'مكياج':
+        context_hints.append("هذا المنتج عبارة عن مكياج/أدوات تجميل (ليس عطراً). تحدث عن اللون، التغطية، الثبات، أو الملمس، ولا تستخدم كلمات عطرية مثل 'فوحان' أو 'ريحة'.")
+    elif ptype == 'معطر_شعر':
+        context_hints.append("هذا المنتج عطر مخصص للشعر. تحدث عن تأثيره على الشعر (ما ينشفه، ريحته تفوح مع الحركة)، ولا تتعامل معه كعطر جسم عادي.")
+    elif ptype == 'معطر_جسم':
+        context_hints.append("هذا معطر جسم (Body Mist)، ركز على الانتعاش والترطيب وخفة الريحة بعد الشاور.")
+    elif ptype == 'بخور':
+        context_hints.append("هذا بخور/عود. استخدم مصطلحات مثل 'الكسرة'، 'الدخان'، 'التبخير'، 'يمسك في الثياب/المجلس'.")
+    elif ptype == 'عناية_جسم':
+        context_hints.append("هذا منتج عناية بالجسم. ركز على الترطيب والنعومة وسرعة الامتصاص.")
+
+    # Gift matching
+    is_gift_male = persona.get('id', persona.get('archId')) == 'هدايا_رجل'
+    is_gift_female = persona.get('id', persona.get('archId')) == 'هدايا_أنثى'
+    
+    if is_gift_male and (pf.get('g') == 'نسائي' or ptype == 'مكياج'):
+        context_hints.append("مهم جداً: أنت رجل واشتريت هذا المنتج كهدية (لزوجتك/أمك/أختك). تحدث عن إعجابها بالهدية وردة فعلها، ولا تتحدث كأنك تستخدمه شخصياً!")
+    elif is_gift_female and pf.get('g') == 'رجالي':
+        context_hints.append("مهم جداً: أنتِ امرأة واشتريتِ هذا المنتج كهدية (لزوجك/أخوكِ/أبوكِ). تحدثي عن فخامة الهدية وكيف عجبته، ولا تتحدثي كأنكِ تستخدمينه شخصياً!")
+
+    if context_hints:
+        cross += "\n\n## تنبيهات سياقية (التزم بها بحذافيرها):\n- " + "\n- ".join(context_hints)
+
     return _make_master_prompt(persona, pf['name'], used_block, extra_block=cross)
 
 
@@ -667,10 +694,30 @@ TRENDING_BRANDS = [
 
 def _pick_products(arch):
     """اختيار عطور ذكية حسب الشخصية مع ترجيح الترند المتقدم"""
-    pool = [p for p in PRODUCTS if p['g'] in arch['prefers']
-            and arch['price'][0] <= p['price'] <= arch['price'][1]]
+    pool = []
+    is_gift_male = arch['id'] == 'هدايا_رجل'
+    is_gift_female = arch['id'] == 'هدايا_أنثى'
+    
+    for p in PRODUCTS:
+        if p['g'] not in arch['prefers']:
+            continue
+        
+        ptype = p.get('product_type', 'عطر')
+        # الذكور (غير الهدايا) لا يشترون مكياج أبداً
+        if arch['g'] == 'male' and not is_gift_male and ptype in ['مكياج', 'معطر_شعر']:
+            continue
+            
+        # الإناث (غير الهدايا) لا يشترين عطور رجالية أبداً
+        if arch['g'] == 'female' and not is_gift_female and p['g'] == 'رجالي':
+            continue
+            
+        if arch['price'][0] <= p['price'] <= arch['price'][1]:
+            pool.append(p)
+            
     if len(pool) < 3:
         pool = [p for p in PRODUCTS if p['g'] in arch['prefers']]
+        # Re-apply strict type filters
+        pool = [p for p in pool if not (arch['g'] == 'male' and not is_gift_male and p.get('product_type') in ['مكياج', 'معطر_شعر'])]
     if len(pool) < 3:
         pool = PRODUCTS[:]
 
