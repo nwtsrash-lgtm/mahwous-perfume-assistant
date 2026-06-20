@@ -106,7 +106,7 @@ except ImportError:
     print('\u26a0\ufe0f anti_repeat not found')
 
 try:
-    from trending import calculate_product_weight, get_trending_names
+    from trending import calculate_product_weight, get_trending_names, blend_selection
     USE_TRENDING = True
     print('\u2705 trending loaded')
 except ImportError:
@@ -722,32 +722,29 @@ def _pick_products(arch):
     if len(pool) < 3:
         pool = PRODUCTS[:]
 
-    # استخدام محرك الترند المتقدم إذا متوفر
-    if USE_TRENDING:
-        weights = [calculate_product_weight(p.get('name',''), p.get('brand','')) for p in pool]
-    else:
-        trend_lower = [b.lower() for b in TRENDING_BRANDS]
-        weights = []
-        for p in pool:
-            brand = p.get('brand','').lower()
-            name = p.get('name','').lower()
-            is_trend = any(tb in brand or tb in name for tb in trend_lower)
-            weights.append(3.0 if is_trend else 1.0)
-
     count = random.randint(*arch['count'])
+
+    # خلطة "محلي" الذكية التلقائية: كربتك (أولوية قصوى) + أفضل 100 ترند + تمويه
+    # مختلفة في كل سلة. تحترم pool المُفلتر (جنس/سعر/نوع) فلا تكسر التماسك.
+    if USE_TRENDING:
+        return blend_selection(PRODUCTS, pool, count, arch['prefers'])
+
+    # شبكة أمان (بلا محرك الترند): ترجيح بسيط للبراندات الترند
+    trend_lower = [b.lower() for b in TRENDING_BRANDS]
+    weights = []
+    for p in pool:
+        brand = p.get('brand', '').lower()
+        name = p.get('name', '').lower()
+        is_trend = any(tb in brand or tb in name for tb in trend_lower)
+        weights.append(3.0 if is_trend else 1.0)
     count = min(count, len(pool))
-
-    selected = []
-    pool_copy = list(pool)
-    w_copy = list(weights)
+    selected, pool_copy, w_copy = [], list(pool), list(weights)
     for _ in range(count):
-        if not pool_copy: break
-        picks = random.choices(range(len(pool_copy)), weights=w_copy, k=1)
-        idx = picks[0]
-        selected.append(pool_copy[idx])
-        pool_copy.pop(idx)
+        if not pool_copy:
+            break
+        idx = random.choices(range(len(pool_copy)), weights=w_copy, k=1)[0]
+        selected.append(pool_copy.pop(idx))
         w_copy.pop(idx)
-
     return selected
 
 STORE_REVIEWS = {

@@ -199,6 +199,96 @@ def get_weight_for_product(product):
         name, brand = str(product), ''
     return calculate_product_weight(name, brand)
 
+# ═══════════════════════════════════════════════════════════
+#  خلطة "محلي" الذكية التلقائية — تُدمج داخل اختيار المنتجات لكل سلة
+#  الهدف: تصدّر كربتك (أولوية قصوى) + أفضل 100 ترند في تقييمات منصة محلي
+#  مختلفة في كل مرة (عشوائية مضبوطة) ولا تكشف نمطاً ثابتاً
+# ═══════════════════════════════════════════════════════════
+
+# ماركة كربتك (Cryptic) — أولوية قصوى في الحملة
+CRYPTIC_KEYS = ('كربتك', 'cryptic', 'كربتيك')
+
+
+def is_cryptic(product):
+    """هل المنتج من ماركة كربتك؟"""
+    blob = ((product.get('brand', '') or '') + ' ' + (product.get('name', '') or '')).lower()
+    return any(k in blob for k in CRYPTIC_KEYS)
+
+
+def is_top_trending(product):
+    """هل المنتج ضمن أفضل 100 ترند (الأكثر مبيعاً) حسب TOP_MALE/TOP_FEMALE؟"""
+    return calculate_product_weight(product.get('name', ''), product.get('brand', '')) > 1.0
+
+
+def smart_blend(pool, count):
+    """خلطة إبداعية مختلفة كل مرة: 1-3 كربتك + غالبية ترند + قليل تمويه.
+
+    تعمل على pool مُفلتر مسبقاً (جنس/سعر/نوع) فلا تكسر تماسك الشخصية.
+    ترجع قائمة منتجات مختلطة ومخلوطة الترتيب.
+    """
+    if not pool:
+        return []
+    count = max(1, min(count, len(pool)))
+
+    cryptic = [p for p in pool if is_cryptic(p)]
+    trending = [p for p in pool if is_top_trending(p) and not is_cryptic(p)]
+    c_ids = {id(p) for p in cryptic}
+    t_ids = {id(p) for p in trending}
+    others = [p for p in pool if id(p) not in c_ids and id(p) not in t_ids]
+
+    selected, used = [], set()
+
+    def _take(items, k):
+        avail = [p for p in items if id(p) not in used]
+        k = min(k, len(avail))
+        if k <= 0:
+            return
+        for p in random.sample(avail, k):
+            selected.append(p)
+            used.add(id(p))
+
+    # (1) كربتك — أولوية قصوى: 1-3 منتجات، مع ترك خانة واحدة على الأقل لغيرها
+    if cryptic:
+        _take(cryptic, min(random.randint(1, 3), max(1, count - 1)))
+
+    # نحجز خانة تمويه واحدة (أو اثنتين للسلال الكبيرة) كي لا تبدو السلة إعلاناً صرفاً
+    rem = count - len(selected)
+    camo_k = 0
+    if others and rem >= 2:
+        camo_k = 1 if rem <= 3 else random.randint(1, 2)
+
+    # (2) غالبية من أفضل 100 ترند (تأخذ كل المتبقي ما عدا خانات التمويه)
+    trend_budget = rem - camo_k
+    if trend_budget > 0 and trending:
+        _take(trending, trend_budget)
+
+    # (3) تمويه: عدد قليل عشوائي من الباقي
+    rem = count - len(selected)
+    if rem > 0 and others:
+        _take(others, rem)
+
+    # (4) إكمال من أي متبقٍ لو لم تكتمل السعة (مجمع صغير)
+    rem = count - len(selected)
+    if rem > 0:
+        _take(pool, rem)
+
+    random.shuffle(selected)  # ترتيب طبيعي لا يكشف النمط
+    return selected
+
+
+def blend_selection(all_products, pool, count, gender_prefs):
+    """الواجهة الموحّدة لاختيار المنتجات: تحقن كربتك المتوافق جنسياً (ولو خارج نطاق
+    السعر — لضمان الأولوية القصوى) ثم تطبّق smart_blend على pool المُفلتر.
+    """
+    merged = list(pool)
+    have = {id(p) for p in merged}
+    for p in all_products:
+        if is_cryptic(p) and id(p) not in have and p.get('g') in gender_prefs:
+            merged.append(p)
+            have.add(id(p))
+    return smart_blend(merged, count)
+
+
 # Standalone test
 if __name__ == '__main__':
     print('✅ Trending loaded')

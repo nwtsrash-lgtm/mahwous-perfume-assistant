@@ -74,7 +74,7 @@ except ImportError:
     def ar_format_used(limit=30): return ''
 
 try:
-    from trending import get_trending_brands, get_weight_for_product
+    from trending import get_trending_brands, get_weight_for_product, blend_selection
     USE_TRENDING = True
 except ImportError:
     pass
@@ -352,18 +352,23 @@ def _fallback_gen_persona():
         pool = [p for p in PRODUCTS if p['g'] in arch['prefers']]
     if len(pool) < 3:
         pool = PRODUCTS[:]
-    weights = []
-    for p in pool:
-        nm = (p.get('brand', '') + p.get('name', '')).lower()
-        weights.append(3.0 if any(t in nm for t in TREND_LOW) else 1.0)
-    count = min(random.randint(*arch['count']), len(pool))
-    sel, pc, wc = [], list(pool), list(weights)
-    for _ in range(count):
-        if not pc:
-            break
-        idx = random.choices(range(len(pc)), weights=wc, k=1)[0]
-        sel.append(pc.pop(idx))
-        wc.pop(idx)
+    count = random.randint(*arch['count'])
+    # خلطة "محلي" الذكية: كربتك (أولوية) + أفضل 100 ترند + تمويه
+    if USE_TRENDING:
+        sel = blend_selection(PRODUCTS, pool, count, arch['prefers'])
+    else:
+        weights = []
+        for p in pool:
+            nm = (p.get('brand', '') + p.get('name', '')).lower()
+            weights.append(3.0 if any(t in nm for t in TREND_LOW) else 1.0)
+        count = min(count, len(pool))
+        sel, pc, wc = [], list(pool), list(weights)
+        for _ in range(count):
+            if not pc:
+                break
+            idx = random.choices(range(len(pc)), weights=wc, k=1)[0]
+            sel.append(pc.pop(idx))
+            wc.pop(idx)
     persona = {
         'name': name, 'city': city, 'gender': arch['g'], 'age': age,
         'label': arch['label'], 'emoji': arch['emoji'], 'archId': arch['id'],
@@ -394,18 +399,23 @@ def gen_persona_full():
             pool = [p for p in PRODUCTS if p['g'] in arch_match['prefers']]
         if len(pool) < 3:
             pool = PRODUCTS[:]
-        weights = []
-        for p in pool:
-            nm = (p.get('brand', '') + p.get('name', '')).lower()
-            weights.append(3.0 if any(t in nm for t in TREND_LOW) else 1.0)
-        count = min(random.randint(*arch_match['count']), len(pool))
-        sel, pc, wc = [], list(pool), list(weights)
-        for _ in range(count):
-            if not pc:
-                break
-            idx = random.choices(range(len(pc)), weights=wc, k=1)[0]
-            sel.append(pc.pop(idx))
-            wc.pop(idx)
+        count = random.randint(*arch_match['count'])
+        # خلطة "محلي" الذكية: كربتك (أولوية) + أفضل 100 ترند + تمويه — مختلفة كل مرة
+        if USE_TRENDING:
+            sel = blend_selection(PRODUCTS, pool, count, arch_match['prefers'])
+        else:
+            weights = []
+            for p in pool:
+                nm = (p.get('brand', '') + p.get('name', '')).lower()
+                weights.append(3.0 if any(t in nm for t in TREND_LOW) else 1.0)
+            count = min(count, len(pool))
+            sel, pc, wc = [], list(pool), list(weights)
+            for _ in range(count):
+                if not pc:
+                    break
+                idx = random.choices(range(len(pc)), weights=wc, k=1)[0]
+                sel.append(pc.pop(idx))
+                wc.pop(idx)
         # تحويل العنوان لنص إذا كان dict
         addr = persona.get('address', '')
         if isinstance(addr, dict):
