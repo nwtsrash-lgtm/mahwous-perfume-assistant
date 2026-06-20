@@ -5,7 +5,7 @@
 مع لوحة استخبارات محلي وتصدير CSV
 """
 import streamlit as st
-import sys, json, random, time, os, csv, io
+import sys, json, random, time, os, csv, io, re
 import requests as http_req
 from pathlib import Path
 from datetime import datetime
@@ -44,11 +44,11 @@ USE_MAHALLI = False
 try:
     from personas_engine import (
         generate_persona, generate_review_params, build_master_prompt,
-        ARCHETYPES, CITY_DATA as PE_CITY_DATA,
+        build_context_hints, ARCHETYPES, CITY_DATA as PE_CITY_DATA,
     )
     USE_NEW_PERSONAS = True
 except ImportError:
-    pass
+    def build_context_hints(persona, product): return ''
 
 try:
     from dialects import get_dialect_for_city, get_dialect_data, get_dialect_examples, apply_typos
@@ -63,10 +63,15 @@ except ImportError:
     pass
 
 try:
-    from anti_repeat import get_used_texts as ar_get_used_texts, archive_review, MAX_ARCHIVE
+    from anti_repeat import (get_used_texts as ar_get_used_texts, archive_review, MAX_ARCHIVE,
+                             is_duplicate as ar_is_duplicate, register_text as ar_register_text,
+                             format_used_texts_block as ar_format_used)
     USE_ANTI_REPEAT = True
 except ImportError:
     MAX_ARCHIVE = 200
+    def ar_is_duplicate(t, threshold=0.6): return False
+    def ar_register_text(t): pass
+    def ar_format_used(limit=30): return ''
 
 try:
     from trending import get_trending_brands, get_weight_for_product
@@ -137,7 +142,7 @@ AI_MODEL = 'google/gemini-2.5-flash'
 #  دوال AI
 # ═══════════════════════════════════════════════════════════
 
-def ai_call(prompt, max_tokens=1200):
+def ai_call(prompt, max_tokens=1200, temperature=1.0):
     """استدعاء API الذكاء الاصطناعي عبر OpenRouter"""
     try:
         r = http_req.post(AI_URL, headers={
@@ -147,7 +152,7 @@ def ai_call(prompt, max_tokens=1200):
             'model': AI_MODEL,
             'messages': [{'role': 'user', 'content': prompt}],
             'max_tokens': max_tokens,
-            'temperature': 1.0,
+            'temperature': temperature,
         }, timeout=60)
         data = r.json()
         if r.status_code != 200:
@@ -164,6 +169,72 @@ def clean_json(result):
         if result.endswith('```'):
             result = result[:-3]
     return result.strip()
+
+
+def _extract_json(result):
+    """استخراج كائن JSON بأمان حتى لو غُلّف بنص/Markdown (يطابق app.extract_json)."""
+    if not result:
+        return None
+    try:
+        cleaned = clean_json(result)
+        m = re.search(r'\{.*\}', cleaned, re.DOTALL)
+        return json.loads(m.group(0) if m else cleaned)
+    except Exception:
+        return None
+
+
+# تنظيف بشري — يزيل كل ترقيم/رموز/إيموجي (منقول من app.py)
+_PUNCT_RE = re.compile(r'[،,؛;:.…·•\-–—_\"“”\'‘’`«»()\[\]{}<>/\\|*#^~=+%&@!؟?]+')
+_EMOJI_RE = re.compile(
+    '[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF'
+    '\U00002190-\U000021FF\U00002B00-\U00002BFF️‍•]+')
+
+
+def _humanize(text):
+    """يزيل كل علامات الترقيم والرموز والإيموجي ويترك تدفّقاً عربياً طبيعياً."""
+    if not text:
+        return ''
+    t = text.replace('\n', ' ').replace('\r', ' ')
+    t = _EMOJI_RE.sub(' ', t)
+    t = _PUNCT_RE.sub(' ', t)
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t
+
+
+# شبكة أمان نهائية (تُستخدم فقط لو رجع الـ AI فارغاً تماماً) — نصوص طبيعية لا «ممتاز»
+_FALLBACK_POOL = [
+    'صراحة عجبني وايد وريحته تدوم', 'حلو ومرتب وثباته طويل',
+    'ريحته تفوح وتلفت الانتباه', 'تعاملهم نظيف والمنتج أصلي',
+    'وصل بسرعة والتغليف مرتب',
+]
+
+
+def _fallback_text():
+    return random.choice(_FALLBACK_POOL)
+
+
+def ai_write_unique(prompt, max_tokens, attempts=5, is_store=False, base_temp=0.9, temp_step=0.06):
+    """يكتب عبر AI مع منع التكرار: يصعّد الحرارة والتلميح حتى نص فريد.
+
+    يرجع dict صالح (أفضل-جهد حتى لو مكرر) أو None عند تعذّر الـ AI كلياً.
+    """
+    best = None
+    for k in range(attempts):
+        hint = '' if k == 0 else (
+            f'\n\n⚠️ المحاولة {k+1}: النص السابق مكرر أو قريب جداً من تقييم موجود. '
+            'غيّر البداية والكلمات والفكرة كلياً واكتب صياغة جديدة تماماً.')
+        out = ai_call(prompt + hint, max_tokens=max_tokens,
+                      temperature=min(1.2, base_temp + k * temp_step))
+        rv = _extract_json(out)
+        if not isinstance(rv, dict):
+            continue
+        txt = (rv.get('text') or '').strip()
+        if not txt:
+            continue
+        best = rv
+        if not (USE_ANTI_REPEAT and ar_is_duplicate(txt, is_store_review=is_store)):
+            return rv
+    return best
 
 # ═══════════════════════════════════════════════════════════
 #  أرشيف التقييمات
@@ -350,40 +421,56 @@ def gen_persona_full():
 # ═══════════════════════════════════════════════════════════
 
 def gen_reviews(persona, perfumes):
-    """توليد تقييمات المنتجات — برومبت متقدم أو قديم"""
-    used = get_used_texts()
-    ub = ''
-    if used:
+    """توليد تقييمات المنتجات — مُحصّن: تنظيف + منع تكرار + إطار هدية + بلا «ممتاز» وهمية."""
+    pname = persona.get('name')
+    if USE_ANTI_REPEAT:
+        ub = ar_format_used(30, persona_name=pname)
+    else:
+        used = get_used_texts() or []
         ub = '\n'.join([f'- {t}' for t in used[-30:]])
 
     if USE_NEW_PERSONAS:
-        # === برومبت متقدم لكل منتج ===
+        # === برومبت متقدم لكل منتج (بارتي كامل مع app.py) ===
         all_reviews = []
         for pf in perfumes:
             review_params = generate_review_params(persona)
+            # تنبيهات الجنس/الهدية/نوع المنتج — نفس منطق Flask (مكياج/معطر شعر/هدية...)
+            extra = build_context_hints(persona, pf)
+            # اسم نظيف (بلا لاحقة سعر) ليعمل بحث الكتالوج وبيانات المنتج بدقة
             prompt = build_master_prompt(
                 persona=persona,
-                product_name=f"{pf['name']} ({pf['brand']}, {pf['price']} ر.س)",
+                product_name=pf['name'],
                 review_params=review_params,
                 used_texts_block=ub,
+                extra_block=extra,
             )
-            result = ai_call(prompt, 400)
-            if result:
+            mx = 400
+            try:
+                mx = 80 + REVIEW_PATTERNS.get(review_params.get('pattern', ''),
+                                              {}).get('words', (1, 20))[1] * 8
+            except Exception:
+                pass
+            rv = ai_write_unique(prompt, max_tokens=mx)
+            txt = (rv.get('text') if isinstance(rv, dict) else '') or ''
+            # أخطاء إملائية طبيعية ثم تنظيف بشري
+            if txt.strip() and USE_DIALECTS and persona.get('has_typo'):
                 try:
-                    rv = json.loads(clean_json(result))
-                    rv['product'] = pf['name']
-                    rv['brand'] = pf['brand']
-                    rv['price'] = pf['price']
-                    all_reviews.append(rv)
-                    continue
+                    txt = apply_typos(txt, 1.0)
                 except Exception:
                     pass
-            # fallback لهذا المنتج
-            all_reviews.append({
-                'product': pf['name'], 'brand': pf['brand'],
-                'price': pf['price'], 'rating': 5, 'text': 'ممتاز',
+            txt = _humanize(txt)
+            if not txt.strip():
+                txt = _fallback_text()  # شبكة أمان طبيعية (لا «ممتاز») عند تعذّر الـ AI
+            entry = rv if isinstance(rv, dict) else {}
+            entry.update({
+                'product': pf['name'], 'brand': pf['brand'], 'price': pf['price'],
+                'rating': entry.get('rating', 5), 'text': txt,
+                'pattern': review_params.get('pattern', ''),
             })
-        archive_batch(all_reviews, persona.get('name', ''))
+            if USE_ANTI_REPEAT:
+                ar_register_text(txt, pname)
+            all_reviews.append(entry)
+        archive_batch(all_reviews, pname or '')
         return all_reviews
     else:
         # === برومبت قديم (batch) ===
@@ -414,7 +501,7 @@ def gen_reviews(persona, perfumes):
 
         result = ai_call(prompt, 2000)
         if not result:
-            return [{'product': p['name'], 'rating': 5, 'text': 'ممتاز',
+            return [{'product': p['name'], 'rating': 5, 'text': _fallback_text(),
                      'brand': p['brand'], 'price': p['price']} for p in perfumes]
         try:
             reviews = json.loads(clean_json(result))[:len(perfumes)]
@@ -426,22 +513,55 @@ def gen_reviews(persona, perfumes):
             archive_batch(reviews, persona.get('name', ''))
             return reviews
         except Exception:
-            return [{'product': p['name'], 'rating': 5, 'text': 'ممتاز',
+            return [{'product': p['name'], 'rating': 5, 'text': _fallback_text(),
                      'brand': p['brand'], 'price': p['price']} for p in perfumes]
 
 
+# جوانب متجر متنوّعة — يُختار جانبان لكل تقييم لمنع التكرار (مطابق app.py)
+STORE_ASPECTS = [
+    'سرعة التوصيل — وصل قبل الموعد', 'فخامة التغليف — فقاعات وكرتون مزدوج',
+    'أصالة العطور 100%', 'خدمة العملاء — ردوا علي بسرعة',
+    'الأسعار — أرخص من المحلات', 'سهولة الطلب والدفع',
+    'العينات المجانية — جاني عينات مع الطلب', 'الكرت الشخصي مع الطلب',
+    'التغليف المحمي ضد الكسر', 'التقسيط — تابي وتمارا بدون فوائد',
+    'تتبع الطلب — كل خطوة واضحة',
+]
+STORE_OPENERS = [
+    'ابدأ بانطباعك المباشر عن تجربة الشراء',
+    'ابدأ بذكر آخر طلب وصلك وكيف كان',
+    'ابدأ بمقارنة بسيطة مع متاجر ثانية تعاملت معها',
+    'ابدأ بردة فعلك أول ما فتحت الطلب',
+    'ابدأ بنصيحة لغيرك يطلب من المتجر',
+]
+
+
 def gen_store_review(persona):
-    """توليد تقييم للمتجر"""
-    prompt = f"""اكتب تقييم قصير (10-20 كلمة) لمتجر "مهووس للعطور" بلهجة سعودية عامية.
-العميل: {persona['label']}، عمره {persona['age']}، من {persona['city']}.
-أرجع JSON فقط: {{"rating":5,"text":"..."}}"""
-    result = ai_call(prompt, 200)
-    if not result:
-        return {'rating': 5, 'text': 'متجر ممتاز والعطور أصلية'}
-    try:
-        return json.loads(clean_json(result))
-    except Exception:
-        return {'rating': 5, 'text': 'متجر ممتاز والعطور أصلية'}
+    """تقييم متجر متنوّع وغير مكرر — يدوّر الجوانب والبداية ويمنع التكرار."""
+    pname = persona.get('name')
+    aspects = random.sample(STORE_ASPECTS, k=2)
+    opener = random.choice(STORE_OPENERS)
+    ub = ar_format_used(15, persona_name=pname) if USE_ANTI_REPEAT else ''
+    prompt = f"""اكتب تقييم قصير (8-16 كلمة) لمتجر "مهووس للعطور" بلهجة سعودية عامية.
+العميل: {persona.get('name', '')}، {persona['label']}، عمره {persona['age']}، من {persona['city']}.
+## ركّز على هذين الجانبين تحديداً (لا غيرهما): {aspects[0]} و{aspects[1]}.
+## قواعد:
+- {opener}
+- لا تبدأ بكلمة "متجر" ولا بنفس الصيغ الجاهزة الشائعة
+- لهجة سعودية عفوية، بدون فصحى، وبدون أي علامات ترقيم أو رموز
+- لا تكرر أياً من هذه الصياغات السابقة:
+{ub if ub else '(لا يوجد سابق)'}
+أرجع JSON فقط: {{"rating": 5, "text": "..."}}"""
+    rv = ai_write_unique(prompt, max_tokens=200, is_store=True)
+    txt = _humanize((rv.get('text') if isinstance(rv, dict) else '') or '')
+    if not txt.strip():
+        txt = 'التوصيل سريع والتغليف فخم والعطور أصلية'  # شبكة أمان طبيعية
+    if USE_ANTI_REPEAT:
+        ar_register_text(txt, pname)
+        try:
+            archive_review(txt, 'متجر مهووس', pname or '')
+        except Exception:
+            pass
+    return {'rating': rv.get('rating', 5) if isinstance(rv, dict) else 5, 'text': txt}
 
 
 # ═══════════════════════════════════════════════════════════
