@@ -158,11 +158,11 @@ def get_dialect_for_city(city_name):
     for city, d in _CITY_TO_DIALECT.items():
         if city in city_name or city_name in city:
             return d
-    return 'najdi'  # default
+    return 'najdi_riyadh'  # default
 
 def get_dialect_data(dialect_key):
     """جلب بيانات لهجة معينة"""
-    return DIALECTS.get(dialect_key, DIALECTS['najdi'])
+    return DIALECTS.get(dialect_key, DIALECTS['najdi_riyadh'])
 
 def get_random_expression(dialect_key):
     """تعبير عشوائي من اللهجة"""
@@ -330,8 +330,8 @@ if __name__ == '__main__':
     print(f'   الدمام → {get_dialect_for_city("الدمام")}')
     print(f'   أبها → {get_dialect_for_city("أبها")}')
     
-    print(f'\n   تعبير نجدي: {get_random_expression("najdi")}')
-    print(f'   تعبير حجازي: {get_random_expression("hijazi")}')
+    print(f'\n   تعبير نجدي: {get_random_expression("najdi_riyadh")}')
+    print(f'   تعبير حجازي: {get_random_expression("hijazi_jeddah")}')
     
     original = 'ممتاز مرة والله ريحته حلو'
     typo_version = apply_typos(original, probability=1.0)
