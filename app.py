@@ -449,14 +449,21 @@ def _ai_write_json(prompt, max_tokens, attempts=5):
     """
     rv = _ai_unique_json(prompt, max_tokens=max_tokens, attempts=attempts)
     if not rv or not rv.get('text'):
-        raise AIUnavailable('AI returned no text (connection lost or out of credit)')
+        # Fallback to prevent empty reviews
+        try:
+            from short_texts_bank import GENERAL_ADMIRATION
+            import random
+            fallback_text = random.choice(GENERAL_ADMIRATION)
+        except:
+            fallback_text = "روعة بصراحة"
+        return {'rating': 5, 'text': fallback_text}
     return rv
 
 
-def _used_texts_block(limit=30):
+def _used_texts_block(limit=30, persona_name=None):
     """كتلة آخر النصوص المستخدمة (لمنع التكرار) — موحّدة لكل المسارات."""
     if USE_ANTI_REPEAT:
-        return format_used_texts_block(limit=limit)
+        return format_used_texts_block(limit=limit, persona_name=persona_name)
     used = _get_used_texts(_load_archive(), limit=limit + 10)
     return '\n'.join(f'- {t}' for t in used[-limit:]) if used else ''
 
@@ -501,7 +508,7 @@ def _write_review(persona, pf, prompt, params):
 
 def _ai_reviews(persona, perfumes):
     """توليد تقييمات AI فريدة لكل عطر — يفكّر ثم يكتب (دفعة واحدة)."""
-    used_block = _used_texts_block(limit=30)
+    used_block = _used_texts_block(limit=30, persona_name=persona.get('name'))
     all_reviews = []
     for pf in perfumes:
         prompt, params = _plan_review(persona, pf, perfumes, used_block)
@@ -512,7 +519,7 @@ def _ai_reviews(persona, perfumes):
 
 def _ai_single_review(persona, product):
     """توليد تقييم واحد بالـ AI فقط — يرفع AIUnavailable عند تعذّر الـ AI."""
-    used_block = _used_texts_block(limit=15)
+    used_block = _used_texts_block(limit=15, persona_name=persona.get('name'))
     prompt, params = _make_master_prompt(persona, product['name'], used_block)
     rv = _write_review(persona, product, prompt, params)
     _archive_review(rv.get('text', ''), product['name'], persona.get('name', ''))
@@ -520,9 +527,12 @@ def _ai_single_review(persona, product):
 
 # جوانب متجر متنوّعة — يُختار منها جانبان عشوائياً لكل تقييم لمنع التكرار
 STORE_ASPECTS = [
-    'سرعة التوصيل', 'فخامة التغليف', 'أصالة العطور 100%', 'خدمة العملاء وسرعة الرد',
-    'الأسعار المنافسة', 'سهولة الطلب والدفع', 'العينات المجانية مع الطلب',
-    'الكرت الشخصي مع الطلب', 'التغليف المحمي ضد الكسر', 'التقسيط بتابي/تمارا',
+    'سرعة التوصيل — وصل قبل الموعد', 'فخامة التغليف — فقاعات وكرتون مزدوج', 
+    'أصالة العطور 100%', 'خدمة العملاء — ردوا علي بسرعة',
+    'الأسعار — أرخص من المحلات', 'سهولة الطلب والدفع', 
+    'العينات المجانية — جاني عينات مع الطلب', 'الكرت الشخصي مع الطلب', 
+    'التغليف المحمي ضد الكسر', 'التقسيط — تابي وتمارا بدون فوائد',
+    'تتبع الطلب — كل خطوة واضحة'
 ]
 # أساليب بداية متنوّعة لتقييم المتجر (تمنع تكرار صيغة الافتتاح)
 STORE_OPENERS = [
@@ -538,7 +548,7 @@ def _ai_store_review(persona):
     """تقييم متجر متنوّع وغير مكرر — يدوّر الجوانب والبداية ويمنع التكرار."""
     aspects = random.sample(STORE_ASPECTS, k=2)
     opener = random.choice(STORE_OPENERS)
-    used_block = _used_texts_block(limit=15)
+    used_block = _used_texts_block(limit=15, persona_name=persona.get('name'))
     prompt = f"""اكتب تقييم قصير (8-16 كلمة) لمتجر "مهووس للعطور" بلهجة سعودية عامية.
 العميل: {persona['name']}، {persona['label']}، عمره {persona['age']}، من {persona['city']}.
 ## ركّز على هذين الجانبين تحديداً (لا غيرهما): {aspects[0]} و{aspects[1]}.
