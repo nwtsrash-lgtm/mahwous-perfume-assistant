@@ -718,12 +718,15 @@ with tab1:
         for r in results:
             p = r['persona']
             for rv in r['reviews']:
+                text = str(rv.get('text', '')).strip()
+                if not text:
+                    continue  # لا تسمح بنسخ تقييم فارغ
                 rows.append("\t".join([
                     str(p.get('name', '')), str(p.get('phone', '')),
                     str(p.get('address', '')), str(rv.get('product', '')),
-                    str(rv.get('rating', 5)), str(rv.get('text', '')),
+                    str(rv.get('rating', 5)), text,
                 ]))
-        st.session_state['copy_all_text'] = "\n".join(rows)
+        st.session_state['copy_all_text'] = "\n".join(rows) if len(rows) > 1 else ""
 
     if st.session_state.get('copy_all_text'):
         st.markdown("**📋 كل البيانات (انسخها للصقها في Excel / Google Sheets):**")

@@ -451,11 +451,12 @@ def _ai_write_json(prompt, max_tokens, attempts=5):
     if not rv or not rv.get('text'):
         # Fallback to prevent empty reviews
         try:
-            from short_texts_bank import GENERAL_ADMIRATION
-            import random
-            fallback_text = random.choice(GENERAL_ADMIRATION)
-        except:
-            fallback_text = "روعة بصراحة"
+            from review_generator import ReviewGenerator
+            gen = ReviewGenerator()
+            # استخراج اسم المنتج إذا أمكن من البرومبت أو وضع قيمة افتراضية
+            fallback_text = gen.generate_reviews("هذا العطر", 200, count=1)[0]['text']
+        except Exception:
+            fallback_text = "روعة بصراحة وثابت"
         return {'rating': 5, 'text': fallback_text}
     return rv
 

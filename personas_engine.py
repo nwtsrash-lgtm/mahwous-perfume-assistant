@@ -604,12 +604,35 @@ def generate_persona(archetype=None):
         'has_typo': has_typo,
         'dialect': dialect,
         'dialect_name': dialect_data['name'],
+        'session_history': []  # تتبع أطوال تقييمات الجلسة
     }
 
 
 def generate_review_params(persona):
     """توليد معايير التقييم (نمط + نجوم + وصف) للشخصية"""
-    pattern = pick_pattern()
+    
+    # 1. تتبع الأطوال لتنويعها (البند 4.1 من التعليمات)
+    history = persona.get('session_history', [])
+    short_count = sum(1 for p in history if p in ['ultra_short', 'scent_no_name', 'longevity'])
+    
+    # محاولة اختيار نمط مناسب بناءً على التاريخ
+    for _ in range(5):
+        pattern = pick_pattern()
+        # إذا كان أول تقييم قصير، لا تسمح بأن يكون الثاني قصير جداً (يفضل التفصيل)
+        if len(history) == 1 and history[0] == 'ultra_short' and pattern == 'ultra_short':
+            continue
+        # لا تسمح بأكثر من تقييمين قصيرين
+        if short_count >= 2 and pattern in ['ultra_short']:
+            continue
+        break
+    else:
+        # fallback
+        pattern = 'expert_detail' if persona['expertise'] == 'خبير' else 'comparison'
+    
+    # تسجيل النمط في التاريخ
+    if 'session_history' in persona:
+        persona['session_history'].append(pattern)
+        
     rating = pick_rating()
     
     # المبتدئ ما يختار أنماط خبير
@@ -648,8 +671,12 @@ MASTER_PROMPT = """أنت {persona_name}، {persona_label}، عمرك {age}، م
 - مستوى خبرتك: {expertise}
 - أسلوبك: {writing_style}
 - اللي يهمك في العطر: {persona_focus}
-## أمثلة طبيعية من لهجتك:
+## اللهجة المطلوبة:
+هذا الشخص من مدينة {city} ولهجته {dialect_name}.
+أمثلة على طريقة كلامه:
 {dialect_examples}
+اكتب التقييم بلهجة أهل {city} بالتحديد وليس بلهجة سعودية عامة.
+لا تخلط بين اللهجات."""
 ## هكذا يكتب عملاء حقيقيون (احتذِ الأسلوب لا الكلمات — عفوية، نواقص بسيطة، بدايات متنوعة):
 {real_examples}
 ## بيانات المنتج (استخدمها لتوجيه إحساسك، لا تسرد المكونات):
