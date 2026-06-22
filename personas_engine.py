@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-محرك الشخصيات العميقة — Deep Persona Engine V2
+محرك الشخصيات العميقة — Deep Persona Engine V3
 كل شخصية بـ 7 أبعاد: mood, expertise, writing_style, mention_product, use_emoji, has_typo, dialect
 V2: ai_directive injection + product data + review banks + enhanced directives
+V3: SOCIO_PROFILES + GENERAL_HUMAN_CONTEXTS + pick_human_context + city_bias + occupation/socio_class
 """
 import random
 import json
 import string
+import datetime as _dt
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
@@ -57,6 +59,13 @@ try:
     _HAS_SHORT_BANK = True
 except ImportError:
     _HAS_SHORT_BANK = False
+
+# محاولة كشف رمضان/العيد هجرياً إن توفّرت المكتبة (اختياري، بدون إلزام)
+try:
+    from hijri_converter import convert as _hijri_convert
+    _HAS_HIJRI = True
+except Exception:
+    _HAS_HIJRI = False
 
 # ═══════════════════════════════════════════════════════════
 #  تحميل بيانات المنتجات المُثرية (مكونات + عائلة عطرية)
@@ -185,6 +194,515 @@ PERSONA_FOCUS = {
     'متذوقة_نيش': 'تحلل النوتات وتقارن بالنيش النسائي وتتكلم عن الفخامة والتطور',
     'ست_بيت': 'يهمها طيب البيت والمناسبات العائلية والسعر المناسب والثبات',
 }
+
+# ═══════════════════════════════════════════════════════════
+#  الملامح الاجتماعية والاقتصادية — SOCIO_PROFILES
+#  لكل شخصية: وظيفة، شريحة دخل، سياقات حياتية، تحيز جغرافي
+# ═══════════════════════════════════════════════════════════
+
+SOCIO_PROFILES = {
+    'شاب_جامعي': {
+        'occupation_ar': 'طالب جامعي',
+        'income_bracket': 'low',
+        'life_contexts': [
+            'من مصروفي الشهري',
+            'البنات بالجامعه سألوني وش عطرك',
+            'ربعي كلهم طلبوه بعدي',
+            'صاحبي نصحني فيه',
+            'لقيته بعرض وما فكرت',
+            'سعره مناسب لطالب',
+            'جبته قبل اختبار وجاب لي حظ',
+            'حطيته بحفلة التخرج',
+        ],
+        'city_bias': None,
+    },
+    'رجل_أعمال': {
+        'occupation_ar': 'رجل أعمال',
+        'income_bracket': 'high',
+        'life_contexts': [
+            'لبسته لاجتماع مهم وكان موفق',
+            'أخذته من السوق الحرة',
+            'زبايني سألوني عنه',
+            'خليته بالمكتب للاجتماعات المهمة',
+            'سكرتيرتي قالت ريحتك حلوه اليوم',
+            'أستخدمه بالسفر للشغل',
+        ],
+        'city_bias': ['الرياض', 'جدة'],
+    },
+    'خبير_عطور': {
+        'occupation_ar': 'هاوي عطور محترف',
+        'income_bracket': 'high',
+        'life_contexts': [
+            'ضفته لمجموعتي الخاصة',
+            'قارنته بعينات عندي',
+            'جربته على الورق أول وبعدين على الجلد',
+            'تابعت تطوره ست ساعات كاملة',
+            'فاجأني بالقاعدة الخشبية',
+            'سألوني عنه بقروب العطور',
+        ],
+        'city_bias': None,
+    },
+    'أب_عائلة': {
+        'occupation_ar': 'أب وموظف',
+        'income_bracket': 'mid',
+        'life_contexts': [
+            'أطفالي يقولون ريحتك حلوه يابابا',
+            'زوجتي اختارته لي',
+            'ألبسه لعزايم العائلة',
+            'أخذته هدية لأبوي وفرح فيه',
+            'الأولاد طلبوا منه',
+            'حطيته يوم الجمعه قبل الصلاة',
+        ],
+        'city_bias': None,
+    },
+    'شاب_رياضي': {
+        'occupation_ar': 'لاعب رياضي',
+        'income_bracket': 'mid',
+        'life_contexts': [
+            'ألبسه بعد النادي على طول',
+            'ريحته تثبت حتى بعد التمرين',
+            'الشباب بالجيم سألوني عنه',
+            'خفيف ما يثقل وقت الرياضة',
+            'حطيته بعد الشاور وطلعت',
+            'جربته بالحر وثبت',
+        ],
+        'city_bias': None,
+    },
+    'كبير_سن': {
+        'occupation_ar': 'متقاعد',
+        'income_bracket': 'mid',
+        'life_contexts': [
+            'يذكرني بأيام الطيبين',
+            'أحطه للمسجد والمجلس',
+            'ولدي جابه لي هدية',
+            'من زمان ما لقيت عود زي كذا',
+            'ريحته تعبق الثوب',
+            'الله يبارك فيكم طيب',
+        ],
+        'city_bias': None,
+    },
+    'موظف': {
+        'occupation_ar': 'موظف حكومي',
+        'income_bracket': 'mid',
+        'life_contexts': [
+            'ألبسه كل يوم للدوام',
+            'الزملاء سألوني عنه',
+            'ما يزعج أحد بالمكتب',
+            'يثبت من الصبح للعصر',
+            'أخذته بعد الراتب',
+            'خليته بدرج المكتب',
+            'ريحته مناسبة للاجتماعات',
+        ],
+        'city_bias': ['الرياض'],
+    },
+    'بنت_عصرية': {
+        'occupation_ar': 'بنت عصرية',
+        'income_bracket': 'mid',
+        'life_contexts': [
+            'صديقاتي كلهم سألوني وش عطرك',
+            'حطيته للكوفي والكل لاحظ',
+            'شفته بتيك توك وطلبته',
+            'لقيته بتخفيضات وما فكرت',
+            'بنات الشلة كلهم طلبوه بعدي',
+            'صار عطري الأساسي',
+            'حطيته لطلعة البنات',
+        ],
+        'city_bias': ['الرياض', 'جدة'],
+    },
+    'أم_سعودية': {
+        'occupation_ar': 'أم وربة منزل',
+        'income_bracket': 'mid',
+        'life_contexts': [
+            'حطيته للعزيمة والكل سأل عنه',
+            'بناتي طلبوا منه',
+            'ريحته تملا المجلس',
+            'ألبسه للمناسبات والأعراس',
+            'جاب لي إياه زوجي هدية',
+            'أستخدمه من سنتين وما مليت',
+            'الحريم بالعزيمة كلهم سألوني',
+        ],
+        'city_bias': None,
+    },
+    'عروس': {
+        'occupation_ar': 'عروس',
+        'income_bracket': 'high',
+        'life_contexts': [
+            'لبسته ليلة ملكتي',
+            'خليته عطر العرس',
+            'زوجي يحب ريحته عليي',
+            'حطيته بشهر العسل',
+            'صديقاتي العرايس كلهم سألوني عنه',
+            'خليته ذكرى أول يوم زواج',
+            'حطيته بالكوشة والكل لاحظ',
+        ],
+        'city_bias': None,
+    },
+    'موظفة': {
+        'occupation_ar': 'موظفة',
+        'income_bracket': 'mid',
+        'life_contexts': [
+            'ألبسه كل يوم للدوام',
+            'الزميلات سألوني عنه',
+            'ما يزعج حد بالمكتب',
+            'يثبت من الصبح لآخر الدوام',
+            'خليته بشنطة المكتب',
+            'حطيته قبل الاجتماع',
+            'المديرة مدحت ريحتي',
+        ],
+        'city_bias': ['الرياض', 'جدة'],
+    },
+    'خبيرة_تجميل': {
+        'occupation_ar': 'خبيرة تجميل',
+        'income_bracket': 'high',
+        'life_contexts': [
+            'قارنته بعطور النيش عندي',
+            'جربته على الزبونات وعجبهم',
+            'أنصح فيه المتابعات',
+            'فاجأني بالثبات والفوحان',
+            'دخلته بتوصياتي الشهرية',
+            'سألوني عنه بالصالون',
+        ],
+        'city_bias': ['الرياض', 'جدة'],
+    },
+    'طالبة': {
+        'occupation_ar': 'طالبة جامعية',
+        'income_bracket': 'low',
+        'life_contexts': [
+            'من مصروفي الشهري',
+            'البنات بالجامعة سألوني وش عطرك',
+            'صديقتي نصحتني فيه',
+            'لقيته بعرض وما فكرت',
+            'سعره مناسب لطالبة',
+            'حطيته لحفلة التخرج',
+            'خذيته من ترشيح بتويتر',
+        ],
+        'city_bias': None,
+    },
+    'جدة': {
+        'occupation_ar': 'سيدة كبيرة',
+        'income_bracket': 'mid',
+        'life_contexts': [
+            'يذكرني بأيام أول',
+            'أحطه للمناسبات والأعراس',
+            'بنتي جابته لي هدية الله يسعدها',
+            'ريحته طيبة ومحترمة',
+            'أبخر فيه البيت',
+            'الله يجزاكم خير ريحته حلوه',
+        ],
+        'city_bias': None,
+    },
+    'مقارن': {
+        'occupation_ar': 'باحث عن القيمة',
+        'income_bracket': 'mid',
+        'life_contexts': [
+            'قارنته بثلاث متاجر قبل ما أطلب',
+            'سعره أرخص من المحل',
+            'نفس الجودة بنص السعر',
+            'شيكت المراجعات قبل الطلب',
+            'فرق السعر يستاهل',
+            'أرخص مكان لقيته فيه',
+        ],
+        'city_bias': None,
+    },
+    'هدايا_رجل': {
+        'occupation_ar': 'يشتري هدايا',
+        'income_bracket': 'mid',
+        'life_contexts': [
+            'أخذته هدية لزوجتي وفرحت فيه',
+            'جبته لأمي بعيد الأم',
+            'التغليف فخم يصلح هدية',
+            'اشتريته لأختي وعجبها',
+            'طلبت حبتين وحده هدية',
+            'ردة فعلها كانت تستاهل كل ريال',
+        ],
+        'city_bias': None,
+    },
+    'هدايا_أنثى': {
+        'occupation_ar': 'تشتري هدايا',
+        'income_bracket': 'mid',
+        'life_contexts': [
+            'جبته هدية لزوجي وصار يومي عنده',
+            'أخذته لأبوي بعيد ميلاده',
+            'التغليف كان فخم ومرتب',
+            'أخوي فرح فيه مره',
+            'طلبت حبتين وحده لزوجي ووحده لأخوي',
+            'هدية ما تنغلط',
+        ],
+        'city_bias': None,
+    },
+    'محب_تسوق': {
+        'occupation_ar': 'محب تسوق إلكتروني',
+        'income_bracket': 'mid',
+        'life_contexts': [
+            'ثاني مره أطلب من عندهم',
+            'جربت كذا متجر وهذا أفضلهم',
+            'التوصيل كان أسرع من المتوقع',
+            'الباكجنق فخم ومرتب',
+            'كل شهر أطلب شي جديد',
+            'صرت زبون دايم',
+        ],
+        'city_bias': None,
+    },
+    'محبة_تسوق': {
+        'occupation_ar': 'محبة تسوق إلكتروني',
+        'income_bracket': 'mid',
+        'life_contexts': [
+            'ثاني مره أطلب من عندهم',
+            'جربت كذا متجر وهذا أفضلهم',
+            'التوصيل كان سريع ماشاءالله',
+            'التغليف يفرح والريحة أحلى',
+            'كل شهر أجرب شي جديد',
+            'صرت زبونة دايمة',
+            'أطلب وأنا مرتاحة',
+        ],
+        'city_bias': None,
+    },
+    'مبتعث': {
+        'occupation_ar': 'طالب مبتعث',
+        'income_bracket': 'mid',
+        'life_contexts': [
+            'قارنته بعطور السوق الحرة',
+            'أرخص من لندن والجوده نفسها',
+            'أصحابي الأجانب سألوني عنه',
+            'جبته معي للابتعاث',
+            'أفضل من اللي بسيفورا',
+            'طلبته أونلاين ووصلني البيت',
+        ],
+        'city_bias': ['الرياض', 'جدة'],
+    },
+    'عسكري': {
+        'occupation_ar': 'عسكري',
+        'income_bracket': 'mid',
+        'life_contexts': [
+            'يثبت بالميدان والحر',
+            'الشباب بالكتيبة سألوني عنه',
+            'ألبسه تحت الدرع ويثبت',
+            'ما يحتاج إعادة رش طول اليوم',
+            'حطيته بالتمرين الصباحي وثبت للمسا',
+            'قوي ويتحمل الشمس',
+        ],
+        'city_bias': ['الرياض', 'تبوك', 'خميس مشيط'],
+    },
+    'معلم': {
+        'occupation_ar': 'معلم',
+        'income_bracket': 'mid',
+        'life_contexts': [
+            'ألبسه كل يوم للمدرسة',
+            'الطلاب يقولون ريحتك حلوه يا أستاذ',
+            'ما يزعج أحد بالفصل',
+            'يثبت من الطابور للعصر',
+            'زملائي المعلمين سألوني عنه',
+            'ريحته هاديه ومحترمة',
+        ],
+        'city_bias': None,
+    },
+    'مهندس': {
+        'occupation_ar': 'مهندس في أرامكو',
+        'income_bracket': 'high',
+        'life_contexts': [
+            'ينفع للمكتب ما يزعج الزملاء',
+            'جربته بعد الدوام وثبت للمسا',
+            'أخذته بعد الراتب',
+            'أحد الشباب بالشركه نصحني فيه',
+            'خليته بدرج المكتب أستخدمه قبل الاجتماعات',
+            'ثباته ست ساعات بالضبط جربته',
+        ],
+        'city_bias': ['الدمام', 'الخبر', 'الظهران'],
+    },
+    'طبيب': {
+        'occupation_ar': 'طبيب',
+        'income_bracket': 'high',
+        'life_contexts': [
+            'ما يزعج المرضى بالعيادة',
+            'ريحته نظيفة تناسب المستشفى',
+            'الممرضات سألوني عنه',
+            'ألبسه تحت البالطو',
+            'حطيته بالمناوبة وثبت ١٢ ساعة',
+            'هادي ومحترم للبيئة الطبية',
+        ],
+        'city_bias': ['الرياض', 'جدة', 'الدمام'],
+    },
+    'متذوق_نيش': {
+        'occupation_ar': 'متذوق عطور نيش',
+        'income_bracket': 'high',
+        'life_contexts': [
+            'ضفته لمجموعتي اللي فوق ال٥٠ عطر',
+            'قارنته بنيش عالمي وفاز',
+            'المواد الخام واضحة فيه',
+            'تطوره على الجلد مختلف عن الورق',
+            'سألوني عنه بقروب العطور',
+            'يستاهل مكانه بالكولكشن',
+        ],
+        'city_bias': ['الرياض', 'جدة'],
+    },
+    'عامل_مقتصد': {
+        'occupation_ar': 'عامل',
+        'income_bracket': 'low',
+        'life_contexts': [
+            'سعره حلو ويكفي شهرين',
+            'أرخص عطر لقيته وريحته حلوه',
+            'ما يحتاج أرش كثير',
+            'يكفيني للدوام كامل',
+            'لقيته بعرض والحمدلله',
+            'ما يخلص بسرعه',
+        ],
+        'city_bias': None,
+    },
+    'وجيه': {
+        'occupation_ar': 'رجل أعمال وجيه',
+        'income_bracket': 'high',
+        'life_contexts': [
+            'ألبسه للمجالس والعزايم',
+            'ريحته تعبق المكان',
+            'الضيوف يسألون عن الطيب',
+            'يليق بالبشت والمناسبات',
+            'جربت أعواد كثير وهذا من أفخمها',
+            'حطيته بصلاة الجمعة',
+        ],
+        'city_bias': ['الرياض', 'مكة المكرمة', 'المدينة المنورة'],
+    },
+    'بدوي': {
+        'occupation_ar': 'محب تراث',
+        'income_bracket': 'mid',
+        'life_contexts': [
+            'بخرت فيه الخيمة',
+            'ريحته تشبه عود الجنوب',
+            'أحطه بالمجلس مع القهوة',
+            'يذكرني بطيب الوالد',
+            'دخنت فيه الثوب وثبت يومين',
+            'ريحته أصيلة ما فيها كيماوي',
+        ],
+        'city_bias': ['حائل', 'بريدة', 'تبوك'],
+    },
+    'مؤثرة': {
+        'occupation_ar': 'مؤثرة عطور بالسوشيال',
+        'income_bracket': 'high',
+        'life_contexts': [
+            'حطيته بستوري والمتابعات كلهم سألوا',
+            'دخلته بتوصياتي الشهرية',
+            'جربته لايف والبنات طلبوه',
+            'أنصح فيه كل اللي يسألوني',
+            'صورته بريل والتفاعل كان نار',
+            'من أكثر عطور اللي رشحتها انطلبت',
+        ],
+        'city_bias': ['الرياض', 'جدة'],
+    },
+    'معلمة': {
+        'occupation_ar': 'معلمة',
+        'income_bracket': 'mid',
+        'life_contexts': [
+            'ألبسه كل يوم للمدرسة',
+            'الطالبات يقولون ريحتك حلوه يا أبله',
+            'ما يزعج حد بالفصل',
+            'يثبت من الصبح لآخر الدوام',
+            'زميلاتي المعلمات سألوني عنه',
+            'ريحته هاديه ومحترمة للمدرسة',
+        ],
+        'city_bias': None,
+    },
+    'طبيبة': {
+        'occupation_ar': 'طبيبة',
+        'income_bracket': 'high',
+        'life_contexts': [
+            'ما يزعج المرضى بالعيادة',
+            'ريحته نظيفة تناسب المستشفى',
+            'الزميلات سألوني عنه',
+            'ألبسه تحت البالطو الأبيض',
+            'حطيته بالمناوبة وثبت طول الليل',
+            'هادي ومحترم للبيئة الطبية',
+        ],
+        'city_bias': ['الرياض', 'جدة', 'الدمام'],
+    },
+    'متذوقة_نيش': {
+        'occupation_ar': 'متذوقة عطور نيش',
+        'income_bracket': 'high',
+        'life_contexts': [
+            'ضفته لمجموعتي الخاصة',
+            'قارنته بنيش نسائي عالمي',
+            'تطوره على الجلد فاجأني',
+            'سألوني عنه بقروب العطور النسائي',
+            'المواد الخام فيه واضحة',
+            'يستاهل مكانه بالكولكشن',
+        ],
+        'city_bias': ['الرياض', 'جدة'],
+    },
+    'ست_بيت': {
+        'occupation_ar': 'ربة منزل',
+        'income_bracket': 'low',
+        'life_contexts': [
+            'أحطه للمناسبات العائلية',
+            'ريحته تطيب البيت',
+            'بناتي يحبون ريحته',
+            'سعره مناسب والحمدلله',
+            'زوجي جابه لي هدية',
+            'ألبسه لعزايم الحريم',
+            'أبخر فيه المجلس',
+        ],
+        'city_bias': None,
+    },
+}
+
+# ═══════════════════════════════════════════════════════════
+#  سياقات إنسانية عامة — GENERAL_HUMAN_CONTEXTS
+#  عبارات حياتية واقعية تُدمج عشوائياً في التقييمات
+# ═══════════════════════════════════════════════════════════
+
+GENERAL_HUMAN_CONTEXTS = [
+    'أخذته هدية لزوجتي',
+    'جاني مكسور بس العطر حلو',
+    'ينفع للدوام',
+    'الكل سألني عنه بالعزيمه',
+    'طلبته بعد ما شفته عند خوي',
+    'وصلني أسرع من المتوقع',
+    'ثاني مره اطلبه',
+    'خلص الأول وبطلب ثاني',
+    'شيبان المسجد سألوني عليه',
+    'حارس العمارة وقفني قال وش عطرك',
+    'تأخر التوصيل يوم بس العطر زين',
+    'الكرتون متعفط بس الريحه تشفع',
+    'صار توقيعي',
+    'زوجتي اختارته لي',
+    'أمي فرحت فيه مره',
+    'البنات بالدوام كل يوم يسألوني',
+    'جبته بالعيد والكل سأل عنه',
+    'رشيته قبل المقابله وانقبلت',
+    'بالصيف ما يتغير',
+    'حطيته بالبرد ريحته أقوى',
+    'استخدمته شهر كامل قبل ما أقيّم',
+    'جربت العينه قبل وبعدها طلبت الكبير',
+    'سعره يستاهل كل ريال',
+    'أرخص من المحل والجوده نفسها',
+    'طلبت حبتين وحده لي ووحده هديه',
+    'ودي لو حجمه أكبر',
+    'نفس ريحة عطر غالي جربته قبل',
+    'حطيته بالعيد وما ندمت',
+    'التوصيل كان سريع ماشاء الله',
+    'التغليف فخم يصلح هديه',
+    'أول بخه قويه شوي بس بعدها تهدا',
+    'ثباته على الثوب أحسن من الجلد',
+    'زوجي فرح فيه مره',
+    'الأطفال يقولون ريحتك حلوه بابا',
+    'جبته من ترشيح أحد بتويتر',
+    'ريحته ما تتغير بالحر',
+    'لبسته لعرس ولفت الانتباه',
+    'بخيته على المعصم وبعد ساعات لسا موجود',
+    'حطيته وأنا رايح السوق والناس تلتفت',
+    'غسلت الثوب وريحته باقية',
+    'رشيته على الشماغ وثبت يومين',
+    'جبته بدل عطر خلص عندي وطلع أحسن',
+    'صاحبتي شمته وطلبت الرابط',
+    'أول عطر أشتريه أونلاين وما ندمت',
+]
+
+
+def pick_human_context(persona):
+    """Pick a random life-context phrase for this persona to inject into reviews."""
+    arch_id = persona.get('archId', '')
+    profile = SOCIO_PROFILES.get(arch_id)
+    if profile and profile.get('life_contexts'):
+        return random.choice(profile['life_contexts'])
+    return ''
+
 
 # ═══════════════════════════════════════════════════════════
 #  بنك تقييمات عملاء حقيقية (نمط واقعي) — يُحقن كأمثلة تعليمية
@@ -323,15 +841,6 @@ def build_seo_block(persona, pattern, max_words=12, dupe_prob=0.55, keyword_prob
 #  الذكاء الزمني والموسمي — يربط التقييم بوقت السيرفر الحالي
 #  (راتب / موسم / مناسبة وطنية / جمعة / رمضان إن توفّر hijri)
 # ═══════════════════════════════════════════════════════════
-
-import datetime as _dt
-
-# محاولة كشف رمضان/العيد هجرياً إن توفّرت المكتبة (اختياري، بدون إلزام)
-try:
-    from hijri_converter import convert as _hijri_convert
-    _HAS_HIJRI = True
-except Exception:
-    _HAS_HIJRI = False
 
 
 def _temporal_signals(now):
@@ -549,19 +1058,28 @@ def generate_persona(archetype=None):
     """توليد شخصية كاملة بـ 7 أبعاد عميقة"""
     if archetype is None:
         archetype = random.choice(ARCHETYPES)
-    
+
     age = random.randint(*archetype['age'])
-    city = _pick_city()
     gender = archetype['g']
+
+    # ── تحيز جغرافي من SOCIO_PROFILES ──
+    socio = SOCIO_PROFILES.get(archetype['id'], {})
+    city_bias = socio.get('city_bias')
+    if city_bias and random.random() < 0.60:
+        # 60% من الوقت نختار من المدن المُفضلة لهذا النموذج
+        city = random.choice(city_bias)
+    else:
+        city = _pick_city()
+
     name = _make_name(gender)
-    
+
     # تحديد اللهجة من المدينة
     dialect = get_dialect_for_city(city)
     dialect_data = get_dialect_data(dialect)
-    
+
     # المزاج
     mood = random.choices(MOODS, weights=MOOD_WEIGHTS, k=1)[0]
-    
+
     # مستوى الخبرة (مع تحيز حسب الشخصية)
     bias = ARCHETYPE_EXPERTISE_BIAS.get(archetype['id'])
     if bias:
@@ -570,19 +1088,23 @@ def generate_persona(archetype=None):
         expertise = random.choices(exp_levels, weights=exp_weights, k=1)[0]
     else:
         expertise = random.choices(EXPERTISE_LEVELS, weights=EXPERTISE_WEIGHTS, k=1)[0]
-    
+
     # أسلوب الكتابة
     writing_style = random.choices(WRITING_STYLES, weights=WRITING_STYLE_WEIGHTS, k=1)[0]
-    
+
     # ذكر المنتج (40% فقط)
     mention_product = random.random() < 0.40
-    
+
     # إيموجي (15% فقط)
     use_emoji = random.random() < 0.15
-    
+
     # أخطاء إملائية (10%)
     has_typo = random.random() < 0.10
-    
+
+    # ── بيانات اجتماعية من SOCIO_PROFILES ──
+    socio_class = socio.get('income_bracket', 'mid')
+    occupation = socio.get('occupation_ar', archetype['label'])
+
     return {
         # بيانات أساسية
         'name': name,
@@ -594,7 +1116,7 @@ def generate_persona(archetype=None):
         'archId': archetype['id'],
         'address': _make_address(city),
         'phone': _make_phone(),
-        
+
         # الأبعاد الـ 7 الجديدة
         'mood': mood,
         'expertise': expertise,
@@ -604,17 +1126,21 @@ def generate_persona(archetype=None):
         'has_typo': has_typo,
         'dialect': dialect,
         'dialect_name': dialect_data['name'],
-        'session_history': []  # تتبع أطوال تقييمات الجلسة
+        'session_history': [],  # تتبع أطوال تقييمات الجلسة
+
+        # V3: بيانات اجتماعية واقتصادية
+        'socio_class': socio_class,
+        'occupation': occupation,
     }
 
 
 def generate_review_params(persona):
     """توليد معايير التقييم (نمط + نجوم + وصف) للشخصية"""
-    
+
     # 1. تتبع الأطوال لتنويعها (البند 4.1 من التعليمات)
     history = persona.get('session_history', [])
     short_count = sum(1 for p in history if p in ['ultra_short', 'scent_no_name', 'longevity'])
-    
+
     # محاولة اختيار نمط مناسب بناءً على التاريخ
     for _ in range(5):
         pattern = pick_pattern()
@@ -628,25 +1154,25 @@ def generate_review_params(persona):
     else:
         # fallback
         pattern = 'expert_detail' if persona['expertise'] == 'خبير' else 'comparison'
-    
+
     # تسجيل النمط في التاريخ
     if 'session_history' in persona:
         persona['session_history'].append(pattern)
-        
+
     rating = pick_rating()
-    
+
     # المبتدئ ما يختار أنماط خبير
     if persona['expertise'] == 'مبتدئ' and pattern == 'expert_detail':
         pattern = 'ultra_short'
-    
+
     # الخبير ما يختار ultra_short كثير
     if persona['expertise'] == 'خبير' and pattern == 'ultra_short':
         if random.random() < 0.7:
             pattern = random.choice(['scent_no_name', 'longevity', 'comparison', 'expert_detail'])
-    
+
     pattern_desc = get_pattern_description(pattern)
     low_reason = get_low_rating_reason(rating) if rating <= 3 else ''
-    
+
     return {
         'pattern': pattern,
         'pattern_desc': pattern_desc,
@@ -834,7 +1360,7 @@ def build_master_prompt(persona, product_name, review_params, used_texts_block='
     # الأنماط القصيرة (≤6 كلمات) لا تتحمّل توجيهات إضافية تطيلها (SEO/زمني)
     seo_block = build_seo_block(persona, review_params['pattern'], max_words=max_words)
     temporal_block = build_temporal_block() if max_words >= 6 else ''
-    
+
     # extra_block يحتوي على التنبيهات السياقية الهامة جداً (مكياج/هدايا) فلا يجوز حذفه!
     directives_block = '\n'.join(b for b in (seo_block, temporal_block, extra_block) if b)
 
@@ -877,19 +1403,24 @@ if __name__ == '__main__':
     print('=' * 50)
     print('Personas Engine Test')
     print('=' * 50)
-    
+
     for i in range(3):
         p = generate_persona()
         params = generate_review_params(p)
+        ctx = pick_human_context(p)
         print(f'\n--- Persona {i+1} ---')
         print(f'  Name: {p["name"]}')
         print(f'  City: {p["city"]} | Dialect: {p["dialect_name"]}')
         print(f'  Label: {p["label"]} | Age: {p["age"]}')
         print(f'  Mood: {p["mood"]} | Expertise: {p["expertise"]}')
         print(f'  Style: {p["writing_style"]}')
+        print(f'  Occupation: {p["occupation"]} | Socio: {p["socio_class"]}')
         print(f'  Mention: {p["mention_product"]} | Emoji: {p["use_emoji"]} | Typo: {p["has_typo"]}')
         print(f'  Pattern: {params["pattern"]} | Rating: {params["rating"]}')
-    
+        print(f'  Human Context: {ctx}')
+
     print(f'\n  Archetypes: {len(ARCHETYPES)}')
+    print(f'  SOCIO_PROFILES: {len(SOCIO_PROFILES)}')
+    print(f'  GENERAL_HUMAN_CONTEXTS: {len(GENERAL_HUMAN_CONTEXTS)}')
     print(f'  Cities in CITY_DATA: {len(CITY_DATA)}')
     print(f'  Test PASSED')
