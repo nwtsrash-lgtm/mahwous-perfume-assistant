@@ -73,32 +73,27 @@ h1{font-size:1.5rem;font-weight:800;text-align:center;padding:20px 0 4px;backgro
 <body>
 <div class="w">
   <h1>🌸 مساعدي في شراء العطور</h1>
-  <p class="sub">🧠 ذكاء اصطناعي • 7,797 عطر • لهجات سعودية • أرشيف ذكي</p>
+  <p class="sub">🧠 ذكاء اصطناعي • 7,797 عطر • لهجات سعودية</p>
   <div class="links">
-    <a class="lnk lm" href="https://boomlify.com/ar/dashboard" target="_blank">📧 إنشاء بريد مؤقت</a>
+    <a class="lnk lm" href="https://boomlify.com/ar/dashboard" target="_blank">📧 بريد مؤقت</a>
     <a class="lnk ls" href="https://mahwous.com" target="_blank">🛒 مهووس</a>
     <a class="lnk ls" href="https://mahally.com" target="_blank">📦 محلي</a>
   </div>
-  <div class="lb" style="text-align:center">عدد الشخصيات:</div>
-  <div class="cnt-row">
-    <button class="cnt-btn on" onclick="setN(1,this)">1</button>
-    <button class="cnt-btn" onclick="setN(5,this)">5</button>
-    <button class="cnt-btn" onclick="setN(10,this)">10</button>
-    <button class="cnt-btn" onclick="setN(20,this)">20</button>
-    <button class="cnt-btn" onclick="setN(50,this)">50</button>
-  </div>
-  <button class="btn" id="goBtn" onclick="gen()">✨ ولّد الشخصيات</button>
-  <button class="btn2 hid" id="newBtn" onclick="newPersona()" style="border-color:#64b5f6;color:#64b5f6">👤 شخصية جديدة</button>
-  <button class="btn2 hid" id="clearBtn" onclick="clearAll()" style="border-color:#ef5350;color:#ef5350;font-size:.78rem">🗑️ مسح الكل</button>
+  <button class="btn" id="goBtn" onclick="gen()">✨ ولّد شخصية</button>
+  <button class="btn2 hid" id="archBtn" onclick="toggleArch()" style="border-color:#ffb74d;color:#ffb74d">📂 المحفوظات (<span id="archCount">0</span>)</button>
   <button class="btn2" id="pushBtn" onclick="gitPush()" style="border-color:#81c784;color:#81c784">🚀 رفع Git Push</button>
-  <div class="counter hid" id="counter"></div>
-  <button class="btn2 hid" id="cpA" onclick="cpAll()">📋 نسخ الكل</button>
   <div id="out"></div>
-  <button class="btn2 hid" id="cpA2" onclick="cpAll()">📋 نسخ الكل</button>
+  <div id="archSection" class="hid">
+    <div class="sep"></div>
+    <div class="lb" style="text-align:center;font-size:.9rem;color:#ffb74d">📂 المحفوظات</div>
+    <button class="btn2" onclick="cpAllArch()" style="border-color:#ffb74d;color:#ffb74d;font-size:.78rem">📋 نسخ كل المحفوظات</button>
+    <button class="btn2" onclick="clearArch()" style="border-color:#ef5350;color:#ef5350;font-size:.72rem">🗑️ مسح المحفوظات</button>
+    <div id="archOut"></div>
+  </div>
 </div>
 <div class="toast" id="tst"></div>
 <script>
-let D=[],N=1;
+let D=[],ARC=[];
 const $=s=>document.getElementById(s);
 function tw(m){const t=$('tst');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1500)}
 function cc(t){navigator.clipboard.writeText(t).then(()=>tw('تم النسخ ✓'))}
@@ -106,40 +101,86 @@ function st(n){return '★'.repeat(n)+'☆'.repeat(5-n)}
 function gc(g){return g==='نسائي'?'gf':(g==='رجالي'?'gm':'gu')}
 function gl(g){return g==='نسائي'?'👩':'👨'}
 function esc(s){return (s||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}
-function setN(n,b){N=n;document.querySelectorAll('.cnt-btn').forEach(x=>x.classList.remove('on'));b.classList.add('on')}
 
+// ═══ توليد شخصية جديدة — القديمة تنتقل للمحفوظات ═══
 async function gen(){
   const b=$('goBtn');b.disabled=true;b.textContent='⏳ جاري التوليد...';
   try{
-    if(N===1){const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});D=[await r.json()];}
-    else{const r=await fetch('/api/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:N})});const d=await r.json();D=d.results;}
-    render();showBtns();
-    $('counter').textContent='✅ '+D.length+' شخصية';
-    saveSession();
-  }catch(e){tw('❌ خطأ')}
-  b.disabled=false;b.textContent='✨ ولّد شخصيات جديدة';
-}
-function showBtns(){$('cpA').classList.remove('hid');$('cpA2').classList.remove('hid');$('counter').classList.remove('hid');$('newBtn').classList.remove('hid');$('clearBtn').classList.remove('hid');}
-function saveSession(){try{localStorage.setItem('mahwous_session',JSON.stringify(D))}catch(e){}}
-function loadSession(){try{const s=localStorage.getItem('mahwous_session');if(s){D=JSON.parse(s);if(D.length){render();showBtns();$('counter').textContent='✅ '+D.length+' شخصية (محفوظة)';$('goBtn').textContent='✨ ولّد شخصيات جديدة';}}}catch(e){}}
-async function newPersona(){
-  const b=$('newBtn');b.disabled=true;b.textContent='⏳ جاري التوليد...';
-  try{
+    // نقل الحالية للمحفوظات
+    if(D.length>0){
+      D.forEach(d=>ARC.unshift(d));
+      saveArch();
+    }
     const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
-    const nv=await r.json();
-    D.push(nv);
-    render();showBtns();
-    $('counter').textContent='✅ '+D.length+' شخصية';
-    saveSession();
-    tw('✅ شخصية جديدة أُضيفت');
-    document.getElementById('c'+(D.length-1)).scrollIntoView({behavior:'smooth'});
+    D=[await r.json()];
+    render();saveSession();updateArchBtn();
   }catch(e){tw('❌ خطأ')}
-  b.disabled=false;b.textContent='👤 شخصية جديدة';
+  b.disabled=false;b.textContent='✨ ولّد شخصية جديدة';
 }
-function clearAll(){D=[];localStorage.removeItem('mahwous_session');$('out').innerHTML='';$('cpA').classList.add('hid');$('cpA2').classList.add('hid');$('counter').classList.add('hid');$('newBtn').classList.add('hid');$('clearBtn').classList.add('hid');$('goBtn').textContent='✨ ولّد الشخصيات';tw('🗑️ تم المسح');}
-async function gitPush(){const b=$('pushBtn');b.disabled=true;b.textContent='⏳ جاري الرفع...';try{const r=await fetch('/api/git-push',{method:'POST'});const d=await r.json();tw(d.ok?'✅ تم الرفع':'❌ '+d.error)}catch(e){tw('❌ فشل الرفع')}b.disabled=false;b.textContent='🚀 رفع Git Push';}
-window.addEventListener('load',loadSession);
 
+// ═══ حفظ واسترجاع ═══
+function saveSession(){try{localStorage.setItem('mh_current',JSON.stringify(D))}catch(e){}}
+function saveArch(){try{localStorage.setItem('mh_archive',JSON.stringify(ARC))}catch(e){}}
+function loadAll(){
+  try{
+    const s=localStorage.getItem('mh_current');
+    if(s){D=JSON.parse(s);if(D.length){render();$('goBtn').textContent='✨ ولّد شخصية جديدة';}}
+    const a=localStorage.getItem('mh_archive');
+    if(a)ARC=JSON.parse(a);
+    updateArchBtn();
+  }catch(e){}
+}
+function updateArchBtn(){
+  $('archCount').textContent=ARC.length;
+  if(ARC.length>0)$('archBtn').classList.remove('hid');
+  else $('archBtn').classList.add('hid');
+}
+
+// ═══ المحفوظات ═══
+function toggleArch(){
+  const sec=$('archSection');
+  if(sec.classList.contains('hid')){sec.classList.remove('hid');renderArch();}
+  else sec.classList.add('hid');
+}
+function renderArch(){
+  let h='';
+  ARC.forEach((d,i)=>{
+    const p=d.persona;
+    h+='<div class="card" style="opacity:.85;border-color:rgba(255,183,77,.15)">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center">'+
+        '<div><span style="font-size:1.2rem">'+p.emoji+'</span> <strong>'+p.name+'</strong> <span class="bg bg-c" style="font-size:.65rem">'+p.city+'</span></div>'+
+        '<button class="sm" onclick="cpOneArch('+i+')">📋</button>'+
+      '</div>'+
+      '<div style="font-size:.72rem;color:var(--t2);margin:3px 0">📱 '+p.phone+' | '+p.label+' | '+p.age+' سنة</div>';
+    d.reviews.forEach(r=>{
+      h+='<div style="font-size:.78rem;padding:3px 6px;margin:2px 0;background:rgba(255,255,255,.02);border-radius:5px;cursor:pointer" onclick="cc(this.textContent)">'+
+        '<span style="color:var(--g);font-size:.7rem">'+st(r.rating)+'</span> '+r.text+'</div>';
+    });
+    if(d.store)h+='<div style="font-size:.72rem;color:var(--t2);margin-top:3px">🏪 '+st(d.store.rating)+' '+d.store.text+'</div>';
+    h+='</div>';
+  });
+  $('archOut').innerHTML=h||'<p style="text-align:center;color:var(--t2)">لا توجد محفوظات</p>';
+}
+function clearArch(){ARC=[];saveArch();updateArchBtn();$('archSection').classList.add('hid');tw('🗑️ تم مسح المحفوظات');}
+function cpOneArch(i){
+  const d=ARC[i],p=d.persona;
+  let t='👤 '+p.name+' | '+p.emoji+' '+p.label+' | '+p.age+' سنة\n📱 '+p.phone+'\n📍 '+p.city+'\n🏠 '+p.address.full+'\n\n';
+  d.reviews.forEach(r=>{t+=st(r.rating)+' '+r.product+': '+r.text+'\n'});
+  if(d.store)t+='🏪 '+st(d.store.rating)+' '+d.store.text+'\n';
+  cc(t);
+}
+function cpAllArch(){
+  let t='📂 المحفوظات — '+ARC.length+' شخصية\n'+'═'.repeat(40)+'\n\n';
+  ARC.forEach((d,i)=>{const p=d.persona;t+='━━━ '+(i+1)+' ━━━\n👤 '+p.name+' | '+p.phone+' | '+p.city+'\n🏠 '+p.address.full+'\n';
+    d.reviews.forEach(r=>{t+=st(r.rating)+' '+r.product+': '+r.text+'\n'});
+    if(d.store)t+='🏪 '+st(d.store.rating)+' '+d.store.text+'\n';t+='\n';});
+  cc(t);
+}
+
+// ═══ Git Push ═══
+async function gitPush(){const b=$('pushBtn');b.disabled=true;b.textContent='⏳ جاري الرفع...';try{const r=await fetch('/api/git-push',{method:'POST'});const d=await r.json();tw(d.ok?'✅ تم الرفع':'❌ '+d.error)}catch(e){tw('❌ فشل الرفع')}b.disabled=false;b.textContent='🚀 رفع Git Push';}
+
+// ═══ عرض الشخصية الحالية ═══
 function render(){
   let h='';
   D.forEach((d,ci)=>{
@@ -169,7 +210,6 @@ function render(){
         '</div>'+
         '<div style="display:flex;gap:4px;justify-content:center;margin-top:4px;flex-wrap:wrap">'+
           '<button class="sm" onclick="cc(\''+p.name+'\\n'+p.phone+'\\n'+p.city+'\\n'+esc(p.address.full)+'\')">📋 اسم+جوال+عنوان</button>'+
-          '<button class="sm" onclick="cc(\''+esc(p.address.full)+'\')">📋 عنوان كامل</button>'+
         '</div>'+
       '</div>'+
       '<div class="sep"></div>'+
@@ -211,48 +251,30 @@ async function reRev(ci,ri){
   try{
     const res=await fetch('/api/regen-review',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({archId:d.persona.archId,product:r.product,price:r.price,brand:r.brand})});
-    const nv=await res.json();
-    d.reviews[ri]=nv;
-    const id='r'+ci+'_'+ri;
-    $('t'+id).textContent=nv.text;
-    $('s'+id).textContent=st(nv.rating);
-    saveSession();
-    tw('✅ تقييم جديد');
+    const nv=await res.json();d.reviews[ri]=nv;
+    const id='r'+ci+'_'+ri;$('t'+id).textContent=nv.text;$('s'+id).textContent=st(nv.rating);
+    saveSession();tw('✅ تقييم جديد');
   }catch(e){tw('❌')}
 }
 
 async function newPh(ci){
-  try{
-    const res=await fetch('/api/new-phone',{method:'POST',headers:{'Content-Type':'application/json'}});
-    const nv=await res.json();
-    D[ci].persona.phone=nv.phone;
-    $('ph'+ci).textContent=nv.phone;
-    tw('✅ رقم جديد');
+  try{const res=await fetch('/api/new-phone',{method:'POST',headers:{'Content-Type':'application/json'}});
+    const nv=await res.json();D[ci].persona.phone=nv.phone;$('ph'+ci).textContent=nv.phone;saveSession();tw('✅ رقم جديد');
   }catch(e){tw('❌')}
 }
 
 async function addMore(ci){
-  const d=D[ci];
-  const existing=d.perfumes.map(p=>p.name);
-  try{
-    const res=await fetch('/api/add-perfumes',{method:'POST',headers:{'Content-Type':'application/json'},
+  const d=D[ci];const existing=d.perfumes.map(p=>p.name);
+  try{const res=await fetch('/api/add-perfumes',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({archId:d.persona.archId,existing:existing})});
     const nv=await res.json();
     if(!nv.perfumes.length){tw('⚠️ لا يوجد عطور إضافية');return;}
-    nv.perfumes.forEach(pf=>{d.perfumes.push(pf)});
-    nv.reviews.forEach(rv=>{d.reviews.push(rv)});
-    // update UI
+    nv.perfumes.forEach(pf=>{d.perfumes.push(pf)});nv.reviews.forEach(rv=>{d.reviews.push(rv)});
     const plE=$('pl'+ci);
-    nv.perfumes.forEach(pf=>{
-      plE.insertAdjacentHTML('beforeend','<div class="pf" style="animation:fu .3s ease-out both"><span class="pf-n" onclick="cc(\''+esc(pf.name)+'\')">'+pf.name+'</span><span class="pf-g '+gc(pf.g)+'">'+gl(pf.g)+'</span><span class="pf-p">'+pf.price+'</span><button class="sm" onclick="cc(\''+esc(pf.name)+'\')">📋</button></div>');
-    });
+    nv.perfumes.forEach(pf=>{plE.insertAdjacentHTML('beforeend','<div class="pf" style="animation:fu .3s ease-out both"><span class="pf-n" onclick="cc(\''+esc(pf.name)+'\')">'+pf.name+'</span><span class="pf-g '+gc(pf.g)+'">'+gl(pf.g)+'</span><span class="pf-p">'+pf.price+'</span><button class="sm" onclick="cc(\''+esc(pf.name)+'\')">📋</button></div>');});
     const rlE=$('rl'+ci);
-    nv.reviews.forEach((rv,i)=>{
-      const ri=d.reviews.length-nv.reviews.length+i;
-      rlE.insertAdjacentHTML('beforeend',rvHTML(ci,ri,rv));
-    });
-    $('pc'+ci).textContent=d.perfumes.length;
-    tw('✅ أضيف '+nv.perfumes.length+' عطور');
+    nv.reviews.forEach((rv,i)=>{const ri=d.reviews.length-nv.reviews.length+i;rlE.insertAdjacentHTML('beforeend',rvHTML(ci,ri,rv));});
+    $('pc'+ci).textContent=d.perfumes.length;saveSession();tw('✅ أضيف '+nv.perfumes.length+' عطور');
   }catch(e){tw('❌')}
 }
 
@@ -264,14 +286,8 @@ function cpOne(i){
   t+='🏪 '+st(d.store.rating)+' '+d.store.text+'\n';
   cc(t);
 }
-function cpAll(){
-  let t='📅 شخصيات مهووس — '+D.length+' شخصية\n🛒 https://mahwous.com\n'+'═'.repeat(40)+'\n\n';
-  D.forEach((d,i)=>{const p=d.persona;t+='━━━ '+(i+1)+' ━━━\n👤 '+p.name+' | '+p.emoji+' '+p.label+' | '+p.age+' سنة\n📱 '+p.phone+' | 📍 '+p.city+'\n🏠 '+p.address.full+'\n';
-    d.perfumes.forEach(pf=>{t+='🧴 '+pf.name+' — '+pf.price+' ر.س\n'});t+='\n';
-    d.reviews.forEach(r=>{t+=st(r.rating)+' '+r.product+': '+r.text+'\n'});
-    t+='🏪 '+st(d.store.rating)+' '+d.store.text+'\n\n'});
-  cc(t);
-}
+
+window.addEventListener('load',loadAll);
 </script>
 </body>
 </html>
