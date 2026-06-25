@@ -89,6 +89,7 @@ h1{font-size:1.5rem;font-weight:800;text-align:center;padding:20px 0 4px;backgro
   </div>
   <button class="btn" id="goBtn" onclick="gen()">✨ ولّد الشخصيات</button>
   <button class="btn2 hid" id="newBtn" onclick="newPersona()" style="border-color:#64b5f6;color:#64b5f6">👤 شخصية جديدة</button>
+  <button class="btn2 hid" id="clearBtn" onclick="clearAll()" style="border-color:#ef5350;color:#ef5350;font-size:.78rem">🗑️ مسح الكل</button>
   <button class="btn2" id="pushBtn" onclick="gitPush()" style="border-color:#81c784;color:#81c784">🚀 رفع Git Push</button>
   <div class="counter hid" id="counter"></div>
   <button class="btn2 hid" id="cpA" onclick="cpAll()">📋 نسخ الكل</button>
@@ -118,10 +119,24 @@ async function gen(){
   }catch(e){tw('❌ خطأ')}
   b.disabled=false;b.textContent='✨ ولّد شخصيات جديدة';
 }
-function showBtns(){$('cpA').classList.remove('hid');$('cpA2').classList.remove('hid');$('counter').classList.remove('hid');$('newBtn').classList.remove('hid');}
+function showBtns(){$('cpA').classList.remove('hid');$('cpA2').classList.remove('hid');$('counter').classList.remove('hid');$('newBtn').classList.remove('hid');$('clearBtn').classList.remove('hid');}
 function saveSession(){try{localStorage.setItem('mahwous_session',JSON.stringify(D))}catch(e){}}
 function loadSession(){try{const s=localStorage.getItem('mahwous_session');if(s){D=JSON.parse(s);if(D.length){render();showBtns();$('counter').textContent='✅ '+D.length+' شخصية (محفوظة)';$('goBtn').textContent='✨ ولّد شخصيات جديدة';}}}catch(e){}}
-function newPersona(){D=[];localStorage.removeItem('mahwous_session');$('out').innerHTML='';$('cpA').classList.add('hid');$('cpA2').classList.add('hid');$('counter').classList.add('hid');$('newBtn').classList.add('hid');$('goBtn').textContent='✨ ولّد الشخصيات';tw('🔄 جاهز لشخصية جديدة');}
+async function newPersona(){
+  const b=$('newBtn');b.disabled=true;b.textContent='⏳ جاري التوليد...';
+  try{
+    const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+    const nv=await r.json();
+    D.push(nv);
+    render();showBtns();
+    $('counter').textContent='✅ '+D.length+' شخصية';
+    saveSession();
+    tw('✅ شخصية جديدة أُضيفت');
+    document.getElementById('c'+(D.length-1)).scrollIntoView({behavior:'smooth'});
+  }catch(e){tw('❌ خطأ')}
+  b.disabled=false;b.textContent='👤 شخصية جديدة';
+}
+function clearAll(){D=[];localStorage.removeItem('mahwous_session');$('out').innerHTML='';$('cpA').classList.add('hid');$('cpA2').classList.add('hid');$('counter').classList.add('hid');$('newBtn').classList.add('hid');$('clearBtn').classList.add('hid');$('goBtn').textContent='✨ ولّد الشخصيات';tw('🗑️ تم المسح');}
 async function gitPush(){const b=$('pushBtn');b.disabled=true;b.textContent='⏳ جاري الرفع...';try{const r=await fetch('/api/git-push',{method:'POST'});const d=await r.json();tw(d.ok?'✅ تم الرفع':'❌ '+d.error)}catch(e){tw('❌ فشل الرفع')}b.disabled=false;b.textContent='🚀 رفع Git Push';}
 window.addEventListener('load',loadSession);
 
