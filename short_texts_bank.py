@@ -101,6 +101,30 @@ GENERAL_ADMIRATION = [
     'ناررر',
 ]
 
+# ═══════════════════════════════════════════════════════════
+#  نصوص قصيرة سلبية
+# ═══════════════════════════════════════════════════════════
+
+NEGATIVE_SHORTS = [
+    'ما عجبني', 'عادي', 'مو حلو', 'ما يستاهل', 'مو ذاك الزود',
+    'توقعت أحسن', 'خفيف مره', 'ما ثبت', 'ما يفوح', 'مو واضح',
+    'ريحته غريبة', 'ما ناسبني', 'ضعيف', 'ما يبين', 'عادي مره',
+    'مو قوي', 'يروح بسرعة', 'ما يمسك', 'مو زين', 'ما ينفع',
+    'خفيف زيادة', 'ما توقعته كذا', 'مو نفس الوصف', 'ما أعيده',
+    'مقبول بس', 'مو مره', 'تحت المتوسط', 'ما لقيت فرق',
+]
+
+# ═══════════════════════════════════════════════════════════
+#  نصوص قصيرة محايدة
+# ═══════════════════════════════════════════════════════════
+
+NEUTRAL_SHORTS = [
+    'وصل', 'تمام', 'ماشي الحال', 'زين', 'اوكي', 'مقبول',
+    'لا بأس', 'يمشي', 'نظيف', 'معقول', 'مو سيء', 'عادي زين',
+    'وصل سليم', 'تمام وصل', 'الحمدلله', 'طيب', 'ماشي',
+    'يصلح', 'مقبول يعني', 'ما فيه مشاكل', 'كويس', 'حلو يعني',
+]
+
 
 # ═══════════════════════════════════════════════════════════
 #  ربط العوائل العطرية بمجموعات النصوص
@@ -122,6 +146,10 @@ FAMILY_TO_BANKS = {
     'gourmand': [FEMININE_SWEET],
     # مسك → خلط بين الأنثوية والعامة
     'musk':     [FEMININE_SWEET, OUD_OCCASIONS],
+    # سلبية → 1-2 نجمة
+    'negative': [NEGATIVE_SHORTS],
+    # محايدة → 3 نجوم
+    'neutral':  [NEUTRAL_SHORTS],
 }
 
 
@@ -282,6 +310,8 @@ def get_all_bank_texts():
     all_texts.update(FRESH_DAILY)
     all_texts.update(FEMININE_SWEET)
     all_texts.update(GENERAL_ADMIRATION)
+    all_texts.update(NEGATIVE_SHORTS)
+    all_texts.update(NEUTRAL_SHORTS)
     return all_texts
 
 
@@ -292,6 +322,8 @@ def get_bank_stats():
         'fresh_daily': len(FRESH_DAILY),
         'feminine_sweet': len(FEMININE_SWEET),
         'general_admiration': len(GENERAL_ADMIRATION),
+        'negative_shorts': len(NEGATIVE_SHORTS),
+        'neutral_shorts': len(NEUTRAL_SHORTS),
         'total_unique': len(get_all_bank_texts()),
     }
 

@@ -55,6 +55,12 @@ except ImportError:
     def bank_pick_exemplars(gender='male', pattern=None, count=3, used_texts=None): return []
 
 try:
+    from golden_reviews import pick_golden_exemplars
+    _HAS_GOLDEN = True
+except ImportError:
+    _HAS_GOLDEN = False
+
+try:
     from short_texts_bank import pick_short_text
     _HAS_SHORT_BANK = True
 except ImportError:
@@ -140,6 +146,15 @@ ARCHETYPES = [
     {'id': 'طبيبة', 'g': 'female', 'label': 'طبيبة', 'emoji': '👩‍⚕️', 'age': (30, 50), 'price': (300, 1200), 'prefers': ['نسائي', 'مشترك'], 'count': (2, 4)},
     {'id': 'متذوقة_نيش', 'g': 'female', 'label': 'متذوقة نيش', 'emoji': '🌸', 'age': (25, 45), 'price': (400, 2500), 'prefers': ['نسائي', 'مشترك'], 'count': (3, 5)},
     {'id': 'ست_بيت', 'g': 'female', 'label': 'ست بيت', 'emoji': '🏠', 'age': (30, 55), 'price': (80, 400), 'prefers': ['نسائي', 'مشترك'], 'count': (2, 4)},
+    # أنماط جديدة — الطبقة 7
+    {'id': 'كسول', 'g': 'male', 'label': 'كسول ما يحب يكتب', 'emoji': '😑', 'age': (18, 55), 'price': (0, 999), 'prefers': [], 'count': (1, 1)},
+    {'id': 'كسولة', 'g': 'female', 'label': 'كسولة ما تحب تكتب', 'emoji': '😑', 'age': (18, 55), 'price': (0, 999), 'prefers': [], 'count': (1, 1)},
+    {'id': 'ناقد_صريح', 'g': 'male', 'label': 'ناقد يقول رأيه بصراحة', 'emoji': '🤨', 'age': (25, 50), 'price': (50, 500), 'prefers': ['عطور رجالية'], 'count': (1, 3)},
+    {'id': 'ناقدة_صريحة', 'g': 'female', 'label': 'ناقدة تقول رأيها بصراحة', 'emoji': '🤨', 'age': (25, 50), 'price': (50, 500), 'prefers': ['عطور نسائية'], 'count': (1, 3)},
+    {'id': 'متردد', 'g': 'male', 'label': 'متردد كان خايف واكتشف', 'emoji': '🤔', 'age': (20, 40), 'price': (30, 300), 'prefers': [], 'count': (1, 2)},
+    {'id': 'مترددة', 'g': 'female', 'label': 'مترددة كانت خايفة واكتشفت', 'emoji': '🤔', 'age': (20, 40), 'price': (30, 300), 'prefers': [], 'count': (1, 2)},
+    {'id': 'متذمر_لطيف', 'g': 'male', 'label': 'يشتكي من شي تافه ثم يمدح', 'emoji': '😂', 'age': (20, 45), 'price': (30, 400), 'prefers': [], 'count': (1, 2)},
+    {'id': 'متذمرة_لطيفة', 'g': 'female', 'label': 'تشتكي من شي تافه ثم تمدح', 'emoji': '😂', 'age': (20, 45), 'price': (30, 400), 'prefers': [], 'count': (1, 2)},
 ]
 
 # ═══════════════════════════════════════════════════════════
@@ -193,6 +208,14 @@ PERSONA_FOCUS = {
     'طبيبة': 'يهمها الأناقة والنظافة والاعتدال وعدم الإزعاج في العيادة',
     'متذوقة_نيش': 'تحلل النوتات وتقارن بالنيش النسائي وتتكلم عن الفخامة والتطور',
     'ست_بيت': 'يهمها طيب البيت والمناسبات العائلية والسعر المناسب والثبات',
+    'كسول': 'ما يحب يكتب كثير، يكتب أقل شي ممكن ويمشي',
+    'كسولة': 'ما تحب تكتب كثير، تكتب أقل شي ممكن وتمشي',
+    'ناقد_صريح': 'يقول رأيه بصراحة، يذكر العيوب قبل الممميزات',
+    'ناقدة_صريحة': 'تقول رأيها بصراحة، تذكر العيوب قبل المميزات',
+    'متردد': 'كان متردد يشتري أونلاين بس جرب واكتشف',
+    'مترددة': 'كانت مترددة تشتري أونلاين بس جربت واكتشفت',
+    'متذمر_لطيف': 'يشتكي من شي بسيط ثم يمدح المنتج',
+    'متذمرة_لطيفة': 'تشتكي من شي بسيط ثم تمدح المنتج',
 }
 
 # ═══════════════════════════════════════════════════════════
@@ -737,8 +760,10 @@ REAL_REVIEW_EXEMPLARS = [
 def pick_real_exemplars(count=3, gender='male'):
     """اختيار أمثلة تقييمات حقيقية لحقنها في البرومبت كمرجع أسلوب.
 
-    V2: يستخدم البنك الخارجي (312+ تقييم) إن توفّر، ثم يكمل من المحلي.
+    V3: يستخدم golden_reviews أولاً إن توفّر، ثم البنك الخارجي، ثم المحلي.
     """
+    if _HAS_GOLDEN:
+        return pick_golden_exemplars(count=count, gender=gender)
     exemplars = []
     # أولاً: جلب من البنك الخارجي الغني
     if _HAS_REVIEW_BANK:
@@ -1054,6 +1079,49 @@ def _make_address(city_name):
 #  توليد شخصية عميقة
 # ═══════════════════════════════════════════════════════════
 
+def cross_product_variation(persona, product_index):
+    """تغيير سلوك الشخصية بين المنتجات — الطبقة 7"""
+    import hashlib
+    seed = hashlib.md5(f"{persona.get('name','')}-{product_index}".encode()).hexdigest()
+    seed_int = int(seed[:8], 16)
+    variations = [
+        {'mood_shift': 2, 'verbosity_shift': 'long', 'style': 'enthusiastic'},
+        {'mood_shift': 0, 'verbosity_shift': 'short', 'style': 'neutral'},
+        {'mood_shift': 1, 'verbosity_shift': 'medium', 'style': 'loyal'},
+        {'mood_shift': -1, 'verbosity_shift': 'short', 'style': 'reserved'},
+        {'mood_shift': 0, 'verbosity_shift': 'medium', 'style': 'different_context'},
+    ]
+    variation = variations[seed_int % len(variations)]
+    varied_persona = dict(persona)
+    original_mood = persona.get('mood', 0)
+    new_mood = max(-2, min(2, original_mood + variation['mood_shift']))
+    varied_persona['mood'] = new_mood
+    varied_persona['_variation_style'] = variation['style']
+    varied_persona['_product_index'] = product_index
+    return varied_persona
+
+
+def generate_writing_fingerprint(persona):
+    """بصمة كتابية فريدة لكل شخصية — الطبقة 7"""
+    import hashlib
+    name = persona.get('name', 'default')
+    seed = int(hashlib.md5(name.encode()).hexdigest()[:8], 16)
+    rng = random.Random(seed)
+    possible_typos = [('ة', 'ه'), ('ي', 'ى'), ('إ', 'ا'), ('أ', 'ا'), ('ؤ', 'و'), ('ئ', 'ي')]
+    persona_typos = rng.sample(possible_typos, k=min(2, len(possible_typos)))
+    all_emojis = ['👍', '❤️', '🔥', '💯', '😍', '✨', '👌', '🤩', '💪', '😊', '🌹', '💐', '😂', '😭', '🥰']
+    preferred_emoji = rng.choice(all_emojis)
+    openers = ['direct', 'greeting', 'exclamation', 'story', 'question']
+    preferred_opener = rng.choice(openers)
+    return {
+        'consistent_typos': persona_typos,
+        'preferred_emoji': preferred_emoji,
+        'preferred_opener': preferred_opener,
+        'typo_rate': rng.choice([0.0, 0.1, 0.25, 0.4]),
+        'emoji_frequency': rng.choice(['never', 'rare', 'sometimes', 'often']),
+    }
+
+
 def generate_persona(archetype=None):
     """توليد شخصية كاملة بـ 7 أبعاد عميقة"""
     if archetype is None:
@@ -1190,72 +1258,57 @@ def generate_review_params(persona):
 #  4. الـ AI يتلقى "مهمة" لا مجرد وصف نمط
 # ═══════════════════════════════════════════════════════════
 
-MASTER_PROMPT = """أنت {persona_name}، {persona_label}، عمرك {age}، من {city}.
-## هويتك:
-- لهجتك: {dialect_name}
-- مزاجك: {mood}
-- مستوى خبرتك: {expertise}
-- أسلوبك: {writing_style}
-- اللي يهمك في العطر: {persona_focus}
-## اللهجة المطلوبة:
-هذا الشخص من مدينة {city} ولهجته {dialect_name}.
-أمثلة على طريقة كلامه:
-{dialect_examples}
-اكتب التقييم بلهجة أهل {city} بالتحديد وليس بلهجة سعودية عامة.
-لا تخلط بين اللهجات.
-## هكذا يكتب عملاء حقيقيون (احتذِ الأسلوب لا الكلمات — عفوية، نواقص بسيطة، بدايات متنوعة):
-{real_examples}
-## بيانات المنتج (استخدمها لتوجيه إحساسك، لا تسرد المكونات):
+MASTER_PROMPT = """اكتب تقييم عطر من 1 إلى 4 كلمات فقط بلهجة سعودية عامية.
+
 المنتج: {product_name}
-{product_data}
-## مهمتك الاستراتيجية:
-{ai_directive}
-## النمط: {pattern_description}
-{directives_block}
-## قواعد صارمة:
-- الطول: {min_words}-{max_words} كلمة فقط — كل كلمة زيادة تُضعف التقييم
-- {opening_rule}
-- {mention_rule}
+التقييم: {rating} نجوم
+
+## أمثلة (التزم بنفس القصر):
+- ممتاز
+- يستاهل كل ريال
+- ريحته ثابتة
+- والله حلو
+- وصل سليم
+- جربته وارتحت
+- عادي بصراحة
+- شكرا مهووس
+- يثبت طول اليوم
+- حلو بس خفيف
+- بطلب مره ثانيه
+- ريحة فخمة
+
+## القواعد:
+- من 1 إلى {max_words} كلمات فقط لا أكثر أبداً
+- لهجة سعودية عامية مو فصحى
+- بدون أي ترقيم أو إيموجي
+- لا تذكر اسم المنتج
 - {typo_rule}
-- التقييم: {rating} نجوم {rating_note}
-- اكتب بتدفّق طبيعي بدون أي علامات ترقيم نهائياً: بلا فواصل «،» وبلا نقاط «.» وبلا «؛ : ؟ !» وبلا إيموجي أو رموز — كأنك تكتب رسالة سريعة لصاحبك
-- النبرة إيجابية أو محايدة تماماً — حتى لو ذكرت ملاحظة بسيطة اجعلها لطيفة لا تنفّر القارئ من الشراء
-## ممنوع منعاً باتاً:
-- ممنوع أي علامة ترقيم أو رمز أو إيموجي إطلاقاً (لا «،» لا «.» لا «!» لا «؟» لا «…»)
-- ممنوع أي كلمة سلبية تنفّر من المنتج أو المتجر (لا «سيء» لا «ما عجبني» لا «رديء» لا «ندمت»)
-- لا تكتب بفصحى أو لغة رسمية — لهجة سعودية عفوية صادقة
-- لا تبدأ بـ "لقد" أو "إن" أو "يعد" أو "هذا المنتج"
-- لا تبدأ التقييم باسم المنتج إطلاقاً — ابدأ بإحساسك أو رأيك أو موقفك
-- لا تسرد المكونات العطرية بالاسم — عبّر عن إحساسك بها (مثلاً: بدل "يحتوي ليمون" قُل "انتعاش")
-- لا تضع نقاط bullet أو قوائم مرقمة
-- لا تكرر هذه الصياغات السابقة (اكتب شيئاً مختلفاً تماماً):
+- كلمات مختلفة تماماً عن كل ما سبق:
 {used_texts_block}
-## صيغة الإخراج:
-يجب أن يكون الرد عبارة عن كائن JSON واحد فقط، لا تكتب أي حرف أو مقدمة أو شرح خارج أقواس الـ JSON.
-- text: نص التقييم (بلا أي ترقيم أو رموز)
-- rating: عدد النجوم ({rating})
-- is_verified_purchase: true دائماً
-أرجع JSON فقط بهذا الشكل: {{"rating": {rating}, "text": "...", "is_verified_purchase": true}}"""
+
+أرجع JSON فقط: {{"rating": {rating}, "text": "...", "is_verified_purchase": true}}"""
 
 
 # تنويع البدايات — كل تقييم يبدأ بأسلوب إنساني مختلف
 OPENING_STYLES = [
-    'ابدأ بانطباعك المباشر بدون مقدمة (مثل: صراحة.. / والله.. / بصراحة..)',
-    'ابدأ بوصف الإحساس أو الموقف اللي عشته مع العطر',
-    'ابدأ من نص القصة مباشرة كأنك تكمل كلام مع صاحبك',
+    'ابدأ بانطباعك المباشر كأنك تحكي لصاحبك',
+    'ابدأ بالموقف اللي خلاك تشتري هالعطر',
+    'ابدأ من نص القصة مباشرة كأنك تكمل كلام',
     'ابدأ بذكر المناسبة أو الوقت اللي استخدمته فيه',
-    'ابدأ برأيك في الريحة أو الثبات على طول',
-    'ابدأ بتعجب أو ردة فعل عفوية',
-    'ابدأ بمقارنة بسيطة أو توقع كان عندك قبل التجربة',
-    'ابدأ بسبب شرائك أو وش خلاك تطلبه',
+    'ابدأ بردة فعل شخص ثاني لما شمك',
+    'ابدأ بمقارنة مع تجربة سابقة',
+    'ابدأ بسبب شرائك',
+    'ابدأ بتفصيلة صغيرة محددة من تجربتك',
+    'ابدأ بإحساس أو ذكرى ربطتها بالريحة',
+    'ابدأ بلحظة فتح الصندوق أو أول رشة',
 ]
 
-# طرق متنوعة لذكر اسم المنتج (لا تكون أول الكلام أبداً)
+# طرق متنوعة لذكر اسم المنتج
 MENTION_STYLES = [
-    'اذكر اسم المنتج مرة وحدة في منتصف الكلام بشكل عابر — لا تبدأ فيه أبداً',
-    'مرر اسم المنتج داخل الجملة بطبيعية وخلِّ بدايتك إحساس أو رأي مو الاسم',
-    'اذكر اسمه قرب النهاية كأنك تتذكره، وابدأ التقييم بانطباعك',
-    'اذكر اسم المنتج بشكل عفوي وسط الجملة مو في أولها',
+    'اذكر اسم المنتج مرة وحدة بشكل عابر وسط الكلام',
+    'مرر اسم المنتج داخل الجملة بطبيعية وخلِّ بدايتك إحساس أو رأي',
+    'اذكر اسمه قرب النهاية كأنك تتذكره',
+    'اذكر اسم المنتج بشكل عفوي وسط قصتك',
 ]
 
 
@@ -1292,107 +1345,25 @@ def build_context_hints(persona, product):
 
 
 def build_master_prompt(persona, product_name, review_params, used_texts_block='', extra_block=''):
-    """بناء البرومبت المتقدم V2.
-
-    التطويرات عن V1:
-    - ai_directive: التوجيه الاستراتيجي من النمط (المهمة النفسية/التسويقية)
-    - product_data: مكونات + عائلة عطرية من الكتالوج المُثرى
-    - review bank exemplars: نماذج من البنك الخارجي (312+ تقييم)
-    - extra_block: توجيهات إضافية يبنيها المستدعي (مثل Cross-Sell)
-    """
-    # --- جلب بيانات النمط ---
+    """بناء برومبت قصير — 4 كلمات بحد أقصى."""
     pattern_info = REVIEW_PATTERNS.get(review_params['pattern'],
                                        REVIEW_PATTERNS.get('ultra_short', {'words': (1, 3)}))
-    min_words, max_words = pattern_info.get('words', (1, 3))
+    _min_words, max_words = pattern_info.get('words', (1, 3))
+    # أقصى حد مطلق: 4 كلمات
+    if max_words > 4:
+        max_words = 4
 
-    # --- التوجيه الاستراتيجي من النمط (المفتاح الجديد!) ---
-    ai_directive = get_ai_directive(review_params['pattern'])
-    if not ai_directive:
-        ai_directive = f'اكتب تقييماً عفوياً وصادقاً عن تجربتك مع هذا العطر ({review_params.get("pattern_desc", "")})'
-
-    # --- بيانات المنتج المُثرية ---
-    product_data = _get_product_data(product_name)
-    if not product_data:
-        product_data = '(لا تتوفر بيانات إضافية — اكتب عن إحساسك العام)'
-
-    # --- قواعد خاصة — تنويع ذكر الاسم وموضعه ---
-    mention_rule = 'لا تذكر اسم المنتج' if not persona['mention_product'] else random.choice(MENTION_STYLES)
-    if review_params['pattern'] == 'scent_no_name':
-        mention_rule = 'لا تذكر اسم المنتج إطلاقاً — صف الريحة فقط'
-
-    # --- تنويع البداية ---
-    opening_rule = random.choice(OPENING_STYLES)
-
-    # --- وضع القِصَر الصارم للأنماط القصيرة جداً (≤3 كلمات) ---
-    # بدون ذكر الاسم (يوفّر كلمات) + تعليمة طول قاطعة لمنع الإطناب
-    if max_words <= 3:
-        mention_rule = 'لا تذكر اسم المنتج إطلاقاً'
-        opening_rule = ('اكتب كلمة أو كلمتين فقط (٣ كلمات كحد أقصى مطلق) تعبّر عن انطباعك — '
-                        'مثل: ممتاز / يجنن / فخم وثابت / خيال والله. ممنوع جملة كاملة أو شرح.')
-    emoji_rule = 'بدون إيموجي نهائياً' if not persona['use_emoji'] else 'إيموجي واحد فقط'
-    typo_rule = 'أضف خطأ إملائي طبيعي واحد' if persona['has_typo'] else 'بدون أخطاء إملائية'
-    rating_note = '— اذكر ملاحظة بسيطة لطيفة بصيغة إيجابية لا تنفّر' if review_params['rating'] <= 3 else ''
-
-    dialect_examples = get_dialect_examples(persona['dialect'], count=4)
-
-    # --- تركيز الشخصية ---
-    persona_focus = PERSONA_FOCUS.get(persona.get('archId', ''), 'يهمك تكتب رأيك الصادق بعفوية')
-
-    # --- أمثلة عملاء حقيقية (V2: من البنك الخارجي + المحلي) ---
-    # للأنماط القصيرة جداً: نحقن أمثلة قصيرة (2-4 كلمات) ليتعلّم النموذج القِصَر
-    # بدل الأمثلة الطويلة التي تدفعه للإطناب.
-    gender = persona.get('gender', 'male')
-    if max_words <= 5 and _HAS_SHORT_BANK:
-        fam = _CATALOG_INDEX.get(product_name, {}).get('scent_family', '')
-        shorts = []
-        for _ in range(8):
-            t = pick_short_text(fam, gender=gender)
-            if t and t not in shorts:
-                shorts.append(t)
-            if len(shorts) >= 4:
-                break
-        real_examples = '\n'.join(f'- {ex}' for ex in shorts) if shorts \
-            else '\n'.join(f'- {ex}' for ex in pick_real_exemplars(3, gender=gender))
-    else:
-        real_examples = '\n'.join(f'- {ex}' for ex in pick_real_exemplars(3, gender=gender))
-
-    # --- كتلة التوجيهات الموحّدة ---
-    # الأنماط القصيرة (≤6 كلمات) لا تتحمّل توجيهات إضافية تطيلها (SEO/زمني)
-    seo_block = build_seo_block(persona, review_params['pattern'], max_words=max_words)
-    temporal_block = build_temporal_block() if max_words >= 6 else ''
-
-    # extra_block يحتوي على التنبيهات السياقية الهامة جداً (مكياج/هدايا) فلا يجوز حذفه!
-    directives_block = '\n'.join(b for b in (seo_block, temporal_block, extra_block) if b)
+    typo_rule = 'أضف خطأ إملائي طبيعي واحد' if persona.get('has_typo') else 'بدون أخطاء إملائية'
 
     prompt = MASTER_PROMPT.format(
-        persona_name=persona['name'],
-        persona_label=persona['label'],
-        age=persona['age'],
-        city=persona['city'],
-        dialect_name=persona['dialect_name'],
-        mood=persona['mood'],
-        expertise=persona['expertise'],
-        writing_style=persona['writing_style'],
-        persona_focus=persona_focus,
-        dialect_examples=dialect_examples,
-        real_examples=real_examples,
         product_name=product_name,
-        product_data=product_data,
-        ai_directive=ai_directive,
-        pattern_description=review_params['pattern_desc'],
-        directives_block=directives_block,
-        min_words=min_words,
-        max_words=max_words,
-        opening_rule=opening_rule,
-        mention_rule=mention_rule,
-        emoji_rule=emoji_rule,
-        typo_rule=typo_rule,
         rating=review_params['rating'],
-        rating_note=rating_note,
+        max_words=max_words,
+        typo_rule=typo_rule,
         used_texts_block=used_texts_block if used_texts_block else '(لا يوجد سابق)',
     )
 
-    return prompt
+    return prompt, review_params
 
 
 # ═══════════════════════════════════════════════════════════

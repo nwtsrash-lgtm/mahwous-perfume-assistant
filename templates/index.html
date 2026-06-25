@@ -81,13 +81,15 @@ h1{font-size:1.5rem;font-weight:800;text-align:center;padding:20px 0 4px;backgro
   </div>
   <div class="lb" style="text-align:center">عدد الشخصيات:</div>
   <div class="cnt-row">
-    <button class="cnt-btn" onclick="setN(1,this)">1</button>
+    <button class="cnt-btn on" onclick="setN(1,this)">1</button>
     <button class="cnt-btn" onclick="setN(5,this)">5</button>
-    <button class="cnt-btn on" onclick="setN(10,this)">10</button>
+    <button class="cnt-btn" onclick="setN(10,this)">10</button>
     <button class="cnt-btn" onclick="setN(20,this)">20</button>
     <button class="cnt-btn" onclick="setN(50,this)">50</button>
   </div>
   <button class="btn" id="goBtn" onclick="gen()">✨ ولّد الشخصيات</button>
+  <button class="btn2 hid" id="newBtn" onclick="newPersona()" style="border-color:#64b5f6;color:#64b5f6">👤 شخصية جديدة</button>
+  <button class="btn2" id="pushBtn" onclick="gitPush()" style="border-color:#81c784;color:#81c784">🚀 رفع Git Push</button>
   <div class="counter hid" id="counter"></div>
   <button class="btn2 hid" id="cpA" onclick="cpAll()">📋 نسخ الكل</button>
   <div id="out"></div>
@@ -95,7 +97,7 @@ h1{font-size:1.5rem;font-weight:800;text-align:center;padding:20px 0 4px;backgro
 </div>
 <div class="toast" id="tst"></div>
 <script>
-let D=[],N=10;
+let D=[],N=1;
 const $=s=>document.getElementById(s);
 function tw(m){const t=$('tst');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1500)}
 function cc(t){navigator.clipboard.writeText(t).then(()=>tw('تم النسخ ✓'))}
@@ -110,11 +112,18 @@ async function gen(){
   try{
     if(N===1){const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});D=[await r.json()];}
     else{const r=await fetch('/api/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:N})});const d=await r.json();D=d.results;}
-    render();$('cpA').classList.remove('hid');$('cpA2').classList.remove('hid');$('counter').classList.remove('hid');
+    render();showBtns();
     $('counter').textContent='✅ '+D.length+' شخصية';
+    saveSession();
   }catch(e){tw('❌ خطأ')}
   b.disabled=false;b.textContent='✨ ولّد شخصيات جديدة';
 }
+function showBtns(){$('cpA').classList.remove('hid');$('cpA2').classList.remove('hid');$('counter').classList.remove('hid');$('newBtn').classList.remove('hid');}
+function saveSession(){try{localStorage.setItem('mahwous_session',JSON.stringify(D))}catch(e){}}
+function loadSession(){try{const s=localStorage.getItem('mahwous_session');if(s){D=JSON.parse(s);if(D.length){render();showBtns();$('counter').textContent='✅ '+D.length+' شخصية (محفوظة)';$('goBtn').textContent='✨ ولّد شخصيات جديدة';}}}catch(e){}}
+function newPersona(){D=[];localStorage.removeItem('mahwous_session');$('out').innerHTML='';$('cpA').classList.add('hid');$('cpA2').classList.add('hid');$('counter').classList.add('hid');$('newBtn').classList.add('hid');$('goBtn').textContent='✨ ولّد الشخصيات';tw('🔄 جاهز لشخصية جديدة');}
+async function gitPush(){const b=$('pushBtn');b.disabled=true;b.textContent='⏳ جاري الرفع...';try{const r=await fetch('/api/git-push',{method:'POST'});const d=await r.json();tw(d.ok?'✅ تم الرفع':'❌ '+d.error)}catch(e){tw('❌ فشل الرفع')}b.disabled=false;b.textContent='🚀 رفع Git Push';}
+window.addEventListener('load',loadSession);
 
 function render(){
   let h='';
@@ -192,6 +201,7 @@ async function reRev(ci,ri){
     const id='r'+ci+'_'+ri;
     $('t'+id).textContent=nv.text;
     $('s'+id).textContent=st(nv.rating);
+    saveSession();
     tw('✅ تقييم جديد');
   }catch(e){tw('❌')}
 }

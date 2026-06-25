@@ -16,7 +16,47 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 ARCHIVE_FILE = DATA_DIR / 'archive.json'
 MAX_ARCHIVE = 500  # Updated to 500
 
-TRACKED_WORDS = ['هيبة', 'بطل', 'فخم', 'خرافي', 'يجنن', 'فواح', 'ثابت', 'أسرع من البرق', 'شي ثاني', 'مو طبيعي', 'والله', 'يهبل', 'خيال', 'دمار']
+TRACKED_WORDS = [
+    # كلمات المديح المحترقة
+    'فخم', 'فخمة', 'فخامة', 'يجنن', 'خرافي', 'رهيب', 'أسطوري',
+    'جبار', 'دمار', 'بطل', 'خيال', 'خيالي', 'يهبل', 'هيبة',
+    'روعة', 'روعه', 'واجد', 'شي ثاني', 'مو طبيعي',
+    # كلمات الثبات
+    'ثابت', 'ثباته', 'فواح', 'فوحان', 'يثبت', 'يفوح',
+    # عبارات متكررة
+    'أسرع من البرق', 'أسرع من هنقرستيشن', 'والله', 'والله العظيم',
+    'يلفت الانتباه', 'شموخ', 'طول اليوم', 'مره حلو',
+    # سياقات محترقة
+    'شيبان المسجد', 'حارس العمارة', 'كل ما ألبسه', 'سألوني',
+    'وقفني', 'يسأل', 'يسألني',
+    # عبارات ختامية متكررة
+    'ما راح أندم', 'أنصح فيه', 'لا يفوتكم', 'ما يطوفكم',
+    'بطلب مره ثانية', 'صار المفضل', 'ما أستغني عنه',
+    # وصف متكرر
+    'يعبي المكان', 'يملى المكان', 'ريحة رجال', 'ريحة شيوخ',
+    'ريحة ملوك', 'تحفة', 'إدمان', 'مدمن عليه',
+]
+
+# أنماط هيكلية متكررة يجب تتبعها
+TRACKED_PATTERNS = [
+    'كل ما ألبسه {شخص} يسألني',
+    'وصلني أسرع من {شيء}',
+    '{شخص} سألني وش عطرك',
+    'جبته هدية ل{شخص} وفرح/ت فيه',
+    'صار عطري اليومي',
+    '{شخص} طلب الرابط',
+    'ريحته {صفة} و{صفة}',
+]
+
+# سياقات مستخدمة يجب تبديلها
+TRACKED_CONTEXTS = [
+    'مسجد', 'حارس', 'عمارة', 'مصعد', 'سيارة', 'أوبر',
+    'زواج', 'عزيمة', 'تخرج', 'مقابلة', 'دوام', 'جمعة',
+    'نادي', 'سوق', 'مطعم', 'مقهى', 'طيارة', 'فندق',
+]
+
+_context_usage = deque(maxlen=50)
+_pattern_structure_usage = deque(maxlen=30)
 
 def _load_archive():
     if ARCHIVE_FILE.exists():
@@ -205,10 +245,69 @@ def reset_adjective_counts():
     global _adjective_counts
     _adjective_counts = {}
 
+def track_context(context_type):
+    """تسجيل استخدام سياق"""
+    _context_usage.append(context_type)
+
+def is_context_burned(context_type, lookback=15):
+    """هل السياق مستخدم في آخر N تقييم؟"""
+    recent = list(_context_usage)[-lookback:]
+    return context_type in recent
+
+def get_available_contexts(lookback=15):
+    """السياقات المتاحة التي لم تُستخدم مؤخراً"""
+    recent = set(list(_context_usage)[-lookback:])
+    return [c for c in TRACKED_CONTEXTS if c not in recent]
+
+def track_pattern_structure(structure):
+    """تسجيل استخدام نمط هيكلي"""
+    _pattern_structure_usage.append(structure)
+
+def is_pattern_structure_burned(structure, lookback=10):
+    """هل النمط الهيكلي مستخدم مؤخراً؟"""
+    recent = list(_pattern_structure_usage)[-lookback:]
+    return structure in recent
+
+def extract_context_from_review(review_text):
+    """استخراج السياق من نص التقييم"""
+    for ctx in TRACKED_CONTEXTS:
+        if ctx in review_text:
+            return ctx
+    return None
+
+def extract_pattern_structure(review_text):
+    """استخراج النمط الهيكلي من التقييم"""
+    structures = []
+    if any(w in review_text for w in ['سألني', 'يسألني', 'سألوني']):
+        structures.append('compliment_question')
+    if any(w in review_text for w in ['وصلني', 'وصل']):
+        structures.append('delivery_comment')
+    if any(w in review_text for w in ['جبته هدية', 'هديته', 'جبتها هدية']):
+        structures.append('gift_story')
+    if any(w in review_text for w in ['صار المفضل', 'صار عطري', 'ما أستغني']):
+        structures.append('loyalty_declaration')
+    if any(w in review_text for w in ['أول ما', 'لما جربته', 'أول ما رشيته']):
+        structures.append('first_impression')
+    return '_'.join(structures) if structures else 'generic'
+
+def register_review_full(review_text, persona_name=None):
+    """تسجيل كامل للتقييم: نص + سياق + نمط"""
+    register_text(review_text, persona_name)
+    
+    # Track context
+    ctx = extract_context_from_review(review_text)
+    if ctx:
+        track_context(ctx)
+    
+    # Track pattern structure
+    structure = extract_pattern_structure(review_text)
+    track_pattern_structure(structure)
+
 def format_used_texts_block(limit=30, persona_name=None):
     used = get_used_texts(limit)
     burned = get_burned_words()
     fingerprint = get_persona_fingerprint(persona_name) if persona_name else []
+    available_contexts = get_available_contexts()
     
     block = ""
     if used:
@@ -220,6 +319,9 @@ def format_used_texts_block(limit=30, persona_name=None):
         
     if fingerprint:
         block += f"\nهذا الشخص استخدم هذه الكلمات في تقييمات سابقة له، لا تجعله يكررها: {', '.join(fingerprint)}\n"
+    
+    if available_contexts:
+        block += f"\nسياقات متاحة للاستخدام (اختر واحد فقط إذا احتجت): {', '.join(available_contexts[:5])}\n"
         
     return block
 

@@ -129,6 +129,14 @@ except ImportError:
     USE_SHORT_BANK = False
     print('\u26a0\ufe0f short_texts_bank not found')
 
+try:
+    from golden_reviews import pick_golden_review, pick_golden_exemplars, get_stats as golden_stats
+    USE_GOLDEN = True
+    print('\u2705 golden_reviews loaded (%d reviews)' % golden_stats()['total'])
+except ImportError:
+    USE_GOLDEN = False
+    print('\u26a0\ufe0f golden_reviews not found')
+
 # \u062f\u0648\u0627\u0644 \u062a\u062a\u0628\u0639 \u0627\u0644\u062a\u0643\u0631\u0627\u0631 (\u0623\u0646\u0645\u0627\u0637 + \u0635\u0641\u0627\u062a) \u2014 \u062a\u064f\u0633\u062a\u062f\u0639\u0649 \u0628\u0639\u062f \u0643\u0644 \u062a\u0648\u0644\u064a\u062f AI \u0646\u0627\u062c\u062d
 try:
     from anti_repeat import track_pattern as ar_track_pattern, track_adjective as ar_track_adjective
@@ -344,20 +352,23 @@ def _make_master_prompt(persona, product_name, used_block, extra_block=''):
     """
     if USE_NEW_PERSONAS:
         params = generate_review_params(persona)
-        prompt = build_master_prompt(persona, product_name, params, used_block, extra_block)
-        return prompt, params
-    # حالة قصوى: personas_engine غير محمّل إطلاقاً
+        result = build_master_prompt(persona, product_name, params, used_block, extra_block)
+        # build_master_prompt returns (prompt, params) tuple
+        if isinstance(result, tuple):
+            return result
+        return result, params
+    # حالة قصوى: personas_engine غير محمّل إطلاقاً — نسرد قصة بدل الوصف الجاف
     rating = 5 if random.random() < 0.6 else (4 if random.random() < 0.7 else 3)
-    g = 'رجل' if persona.get('gender') == 'male' else 'امرأة'
     prompt = (
-        f"اكتب تقييم واحد كعميل سعودي حقيقي بلهجة سعودية عامية.\n"
-        f"العميل: {persona.get('label','')}، {g}، {persona.get('age','')} سنة، من {persona.get('city','')}\n"
-        f"العطر: {product_name}\n"
-        f"اكتب 3-20 كلمة. التقييم {rating} نجوم.\n"
+        f"اكتب تقييم عطر من 1 إلى 4 كلمات فقط بلهجة سعودية عامية.\n"
+        f"المنتج: {product_name}\n"
+        f"التقييم: {rating} نجوم\n"
+        f"أمثلة: ممتاز / والله حلو / ريحته ثابتة / يستاهل كل ريال\n"
+        f"لا تذكر اسم المنتج. بدون ترقيم.\n"
         f"{('لا تكرر: ' + used_block) if used_block else ''}\n"
         f'أرجع JSON فقط: {{"rating": {rating}, "text": "...", "is_verified_purchase": true}}'
     )
-    return prompt, {'rating': rating, 'pattern': 'scent_no_name'}
+    return prompt, {'rating': rating, 'pattern': 'ultra_short'}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -527,6 +538,10 @@ def _write_review(persona, pf, prompt, params):
         rv['text'] = apply_typos(rv['text'], probability=1.0)
     # تنظيف نهائي: نص بشري متدفّق بلا ترقيم أو رموز (ضمان مطلق)
     rv['text'] = _humanize(rv.get('text', ''))
+    # ══ قص إجباري: 4 كلمات بحد أقصى ══
+    _words = rv['text'].split()
+    if len(_words) > 4:
+        rv['text'] = ' '.join(_words[:4])
 
     if USE_AR_TRACK:
         ar_track_pattern(params.get('pattern', 'default'))
@@ -577,14 +592,22 @@ def _ai_store_review(persona):
     aspects = random.sample(STORE_ASPECTS, k=2)
     opener = random.choice(STORE_OPENERS)
     used_block = _used_texts_block(limit=15, persona_name=persona.get('name'))
+    # Get golden exemplar for store reviews
+    store_exemplar = ''
+    if USE_GOLDEN:
+        exemplars = pick_golden_exemplars(count=2, story_type='returning_customer')
+        store_exemplar = '\n'.join(f'مثال: {ex}' for ex in exemplars)
+    
     prompt = f"""اكتب تقييم قصير (8-16 كلمة) لمتجر "مهووس للعطور" بلهجة سعودية عامية.
 العميل: {persona['name']}، {persona['label']}، عمره {persona['age']}، من {persona['city']}.
-## ركّز على هذين الجانبين تحديداً (لا غيرهما): {aspects[0]} و{aspects[1]}.
-## قواعد:
+## ركّز على هذين الجانبين: {aspects[0]} و{aspects[1]}.
+## احكِ قصتك مع المتجر:
 - {opener}
-- لا تبدأ بكلمة "متجر" ولا بنفس الصيغ الجاهزة الشائعة
-- لهجة سعودية عفوية، بدون فصحى
-- لا تكرر أياً من هذه الصياغات السابقة:
+- اكتب كأنك تحكي لصاحبك عن تجربة الشراء
+- اذكر تفصيلة واحدة محددة من تجربتك
+- بلهجة سعودية عفوية بدون ترقيم
+{store_exemplar}
+- لا تكرر هذه الصياغات:
 {used_block if used_block else '(لا يوجد سابق)'}
 أرجع JSON فقط: {{"rating": 5, "text": "..."}}"""
     rv = _ai_write_json(prompt, max_tokens=200, attempts=5)  # يرفع AIUnavailable عند الفشل
@@ -909,6 +932,22 @@ def add_perfumes():
 @app.route('/api/new-phone', methods=['POST'])
 def new_phone():
     return jsonify({'phone': _phone()})
+
+
+@app.route('/api/git-push', methods=['POST'])
+def git_push():
+    """رفع التعديلات إلى Railway عبر git push"""
+    import subprocess
+    try:
+        cwd = os.environ.get('DATA_DIR', os.path.dirname(os.path.abspath(__file__)))
+        subprocess.run(['git', 'add', '.'], cwd=cwd, check=True, capture_output=True, timeout=30)
+        subprocess.run(['git', 'commit', '-m', 'auto update'], cwd=cwd, capture_output=True, timeout=30)
+        result = subprocess.run(['git', 'push'], cwd=cwd, check=True, capture_output=True, timeout=60)
+        return jsonify({'ok': True, 'msg': 'تم الرفع بنجاح'})
+    except subprocess.CalledProcessError as e:
+        return jsonify({'ok': False, 'error': e.stderr.decode('utf-8', errors='replace')[:200]}), 500
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 500
 
 @app.route('/api/archive', methods=['GET'])
 def archive_stats():

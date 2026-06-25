@@ -940,3 +940,41 @@ if __name__ == '__main__':
     print(f'\n   المدن المتاحة: {len(get_all_cities())} مدينة')
     print(f'   الأخطاء الطبيعية: {len(NATURAL_TYPOS)} كلمة')
     print('\n✅ All tests passed')
+
+# ═══════════════════════════════════════════════════════════
+#  تعبيرات سلبية حسب اللهجة — جديد
+# ═══════════════════════════════════════════════════════════
+
+NEGATIVE_DIALECT_EXPRESSIONS = {
+    'najdi': ['مو ذاك الزود', 'ما هو كثير', 'مو مره', 'ما يسوى', 'ما جاب العيد'],
+    'hijazi': ['مش ولا بد', 'عادي يعني', 'مو كدا', 'ما يسوى كدا', 'مش زي ما قالوا'],
+    'sharqi': ['ما يسوى هالحچي', 'مو شين بس عادي', 'ما يمدح', 'ما هو چي', 'عادي مو أكثر'],
+    'janoubi': ['ما هو حلو قوي', 'عادي مره', 'ما يستاهل', 'مو زين', 'ما جاب نتيجة'],
+}
+
+COMPLAINT_PATTERNS = {
+    'najdi': ['التوصيل تأخر وش ذا', 'ما جا على الموعد', 'التغليف مو مره', 'ما ناسبني أبد'],
+    'hijazi': ['التوصيل اتأخر كتير', 'ما جاش في المعاد', 'التغليف مش حلو', 'ما ناسبني أبداً'],
+    'sharqi': ['التوصيل تأخر واجد', 'ما يا بالوقت', 'التغليف عادي مره', 'ما ناسبني صراحه'],
+    'janoubi': ['التوصيل تأخر مره', 'ما جا بوقته', 'التغليف بسيط', 'ما ناسبني والله'],
+}
+
+def get_negative_expression(dialect_key):
+    family = dialect_key.split('_')[0] if '_' in dialect_key else dialect_key
+    mapping = {'najdi': 'najdi', 'qassimi': 'najdi', 'hijazi': 'hijazi',
+               'sharqi': 'sharqi', 'ahsai': 'sharqi', 'shamali': 'najdi',
+               'janoubi': 'janoubi', 'najrani': 'janoubi'}
+    fam = mapping.get(family, 'najdi')
+    exprs = NEGATIVE_DIALECT_EXPRESSIONS.get(fam, NEGATIVE_DIALECT_EXPRESSIONS['najdi'])
+    import random as _rnd
+    return _rnd.choice(exprs)
+
+def get_complaint_pattern(dialect_key):
+    family = dialect_key.split('_')[0] if '_' in dialect_key else dialect_key
+    mapping = {'najdi': 'najdi', 'qassimi': 'najdi', 'hijazi': 'hijazi',
+               'sharqi': 'sharqi', 'ahsai': 'sharqi', 'shamali': 'najdi',
+               'janoubi': 'janoubi', 'najrani': 'janoubi'}
+    fam = mapping.get(family, 'najdi')
+    patterns = COMPLAINT_PATTERNS.get(fam, COMPLAINT_PATTERNS['najdi'])
+    import random as _rnd
+    return _rnd.choice(patterns)
