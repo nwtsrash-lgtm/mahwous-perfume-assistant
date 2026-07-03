@@ -592,20 +592,22 @@ def _ai_store_review(persona):
         exemplars = pick_golden_exemplars(count=2, story_type='returning_customer')
         store_exemplar = '\n'.join(f'مثال: {ex}' for ex in exemplars)
     
-    prompt = f"""اكتب تقييم قصير (8-16 كلمة) لمتجر "مهووس للعطور" بلهجة سعودية عامية.
-العميل: {persona['name']}، {persona['label']}، عمره {persona['age']}، من {persona['city']}.
+    prompt = f"""اكتب تقييم قصير (من ثمان إلى ست عشرة كلمة) لمتجر "مهووس للعطور" بلهجة سعودية عامية.
+أنت العميل نفسه ({persona['label']}، عمره {persona['age']}، من {persona['city']}) تكتب تقييمك بصيغة المتكلّم عن تجربتك.
 ## ركّز على هذين الجانبين: {aspects[0]} و{aspects[1]}.
 ## احكِ قصتك مع المتجر:
 - {opener}
 - اكتب كأنك تحكي لصاحبك عن تجربة الشراء
 - اذكر تفصيلة واحدة محددة من تجربتك
-- بلهجة سعودية عفوية بدون ترقيم
+- بلهجة سعودية عفوية بدون ترقيم ولا أرقام
+- لا تُخاطب أحدًا بالاسم ولا تستعمل نداءً («يا فلان»)، ولا تذكر اسمك في النص
 {store_exemplar}
 - لا تكرر هذه الصياغات:
 {used_block if used_block else '(لا يوجد سابق)'}
 أرجع JSON فقط: {{"rating": 5, "text": "..."}}"""
     rv = _ai_write_json(prompt, max_tokens=200, attempts=5)  # يرفع AIUnavailable عند الفشل
     rv['text'] = _humanize(rv.get('text', ''))  # بلا ترقيم أو رموز
+    rv['text'] = re.sub(r'\s+', ' ', re.sub(r'[0-9٠-٩]+', ' ', rv['text'])).strip()  # ضمان صفر أرقام (مسار المتجر)
     _register(rv['text'])
     if USE_ANTI_REPEAT:
         try:

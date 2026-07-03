@@ -544,18 +544,20 @@ def gen_store_review(persona):
     aspects = random.sample(STORE_ASPECTS, k=2)
     opener = random.choice(STORE_OPENERS)
     ub = ar_format_used(15, persona_name=pname) if USE_ANTI_REPEAT else ''
-    prompt = f"""اكتب تقييم قصير (8-16 كلمة) لمتجر "مهووس للعطور" بلهجة سعودية عامية.
-العميل: {persona.get('name', '')}، {persona['label']}، عمره {persona['age']}، من {persona['city']}.
+    prompt = f"""اكتب تقييم قصير (من ثمان إلى ست عشرة كلمة) لمتجر "مهووس للعطور" بلهجة سعودية عامية.
+أنت العميل نفسه ({persona['label']}، عمره {persona['age']}، من {persona['city']}) تكتب تقييمك بصيغة المتكلّم عن تجربتك.
 ## ركّز على هذين الجانبين تحديداً (لا غيرهما): {aspects[0]} و{aspects[1]}.
 ## قواعد:
 - {opener}
 - لا تبدأ بكلمة "متجر" ولا بنفس الصيغ الجاهزة الشائعة
-- لهجة سعودية عفوية، بدون فصحى، وبدون أي علامات ترقيم أو رموز
+- لهجة سعودية عفوية، بدون فصحى، وبدون أي علامات ترقيم أو رموز أو أرقام
+- لا تُخاطب أحدًا بالاسم ولا تستعمل نداءً («يا فلان»)، ولا تذكر اسمك في النص
 - لا تكرر أياً من هذه الصياغات السابقة:
 {ub if ub else '(لا يوجد سابق)'}
 أرجع JSON فقط: {{"rating": 5, "text": "..."}}"""
     rv = ai_write_unique(prompt, max_tokens=200, is_store=True)
     txt = _humanize((rv.get('text') if isinstance(rv, dict) else '') or '')
+    txt = re.sub(r'\s+', ' ', re.sub(r'[0-9٠-٩]+', ' ', txt)).strip()  # ضمان صفر أرقام (مسار المتجر)
     if not txt.strip():
         # قانون 4: لا نص وهمي — نتوقف ونُظهر خطأ بدل الفبركة.
         st.error('تعذّر الاتصال بالذكاء الاصطناعي أو نفد الرصيد — لم تتم كتابة أي تقييم.')
