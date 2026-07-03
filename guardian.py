@@ -82,30 +82,76 @@ def check_archetypes_parity():
     return r
 
 
-def check_fallback_as_review():
-    """قانون 4: يصطاد نصًّا مثبّتًا/احتياطيًا يُعاد كـ تقييم (dict فيه 'text') بدل رفع 503."""
-    tree = ast.parse(APP.read_text(encoding='utf-8'), filename=str(APP))
+ENTRY_FILES = ['app.py', 'streamlit_app.py']       # مدخلا التطبيق (مصيدة #2) — يُمسحان معًا
+_FAKE_FUNC = re.compile(r'fallback|dummy|fake|template', re.I)
+
+
+def _call_name(f):
+    if isinstance(f, ast.Name):
+        return f.id
+    if isinstance(f, ast.Attribute):
+        return f.attr
+    return None
+
+
+def _review_dicts(value):
+    """قواميس التقييم داخل قيمة return: dict مباشر / list / list-comprehension."""
+    if isinstance(value, ast.Dict):
+        return [value]
+    if isinstance(value, ast.List):
+        return [e for e in value.elts if isinstance(e, ast.Dict)]
+    if isinstance(value, ast.ListComp) and isinstance(value.elt, ast.Dict):
+        return [value.elt]
+    return []
+
+
+def _fake_text_class(tv, lit_vars):
+    """يصنّف قيمة 'text' إن كانت فبركة (ليست ناتج الـ AI). يرجع تصنيفًا أو None."""
+    if isinstance(tv, ast.Constant) and isinstance(tv.value, str) and tv.value.strip():
+        return 'نص-حرفي'
+    if isinstance(tv, ast.Name):
+        if tv.id in lit_vars:
+            return 'متغيّر-من-نص-حرفي'
+        if 'fallback' in tv.id.lower():
+            return 'متغيّر-fallback'
+    if isinstance(tv, ast.Call):
+        fn = _call_name(tv.func)
+        if fn and _FAKE_FUNC.search(fn):
+            return f'استدعاء-{fn}()'
+    return None
+
+
+def check_fallback_as_review(paths=None):
+    """قانون 4 (مصيدة #2): في *أي* دالة، أي return لقاموس تقييم (rating+text) نصّه ليس ناتج الـ AI
+    — نص حرفي / متغيّر من نص حرفي / متغيّر fallback / استدعاء دالة fallback|dummy|fake|template —
+    = فبركة تُرفض. يمسح مدخلي التطبيق معًا (app.py + streamlit_app.py) عبر AST، بلا تنفيذ."""
+    if paths is None:
+        paths = [ROOT / f for f in ENTRY_FILES]
     hits = []
-    for node in ast.walk(tree):
-        # (أ) return لقاموس شكله تقييم، ونصّه ثابت أو من متغيّر fallback
-        if isinstance(node, ast.Return) and isinstance(node.value, ast.Dict):
-            tv = None
-            for k, v in zip(node.value.keys, node.value.values):
-                if isinstance(k, ast.Constant) and k.value == 'text':
-                    tv = v
-            if tv is not None:
-                keys = [k.value for k in node.value.keys if isinstance(k, ast.Constant)]
-                is_review = 'rating' in keys  # قاموس شكله تقييم كامل (rating+text) = فبركة صريحة
-                if isinstance(tv, ast.Constant) and isinstance(tv.value, str):
-                    label = 'return-تقييم-مفبرك(rating+نص-حرفي)' if is_review else 'return-نص-ثابت'
-                    hits.append((label, node.lineno, repr(tv.value)[:42]))
-                elif isinstance(tv, ast.Name) and 'fallback' in tv.id.lower():
-                    hits.append(('return-متغيّر-fallback', node.lineno, tv.id))
-        # (ب) إسناد سلسلة حرفية لمتغيّر اسمه fallback* (النص الوهمي الجاهز)
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
-            for t in node.targets:
-                if isinstance(t, ast.Name) and 'fallback' in t.id.lower():
-                    hits.append(('نص-fallback-مثبّت', node.lineno, repr(node.value.value)[:42]))
+    for p in (Path(x) for x in paths):
+        if not p.exists():
+            continue
+        tree = ast.parse(p.read_text(encoding='utf-8'), filename=str(p))
+        seen = set()
+        for fn in [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+            # متغيّرات أُسنِد إليها نص حرفي غير فارغ ولو مرّة داخل هذه الدالة (يلتقط الفرع الاحتياطي)
+            lit_vars = {t.id for m in ast.walk(fn)
+                        if isinstance(m, ast.Assign) and isinstance(m.value, ast.Constant)
+                        and isinstance(m.value.value, str) and m.value.value.strip()
+                        for t in m.targets if isinstance(t, ast.Name)}
+            for n in ast.walk(fn):
+                if not isinstance(n, ast.Return):
+                    continue
+                for d in _review_dicts(n.value):
+                    keys = [k.value for k in d.keys if isinstance(k, ast.Constant)]
+                    if 'rating' not in keys or 'text' not in keys:
+                        continue
+                    tv = next((v for k, v in zip(d.keys, d.values)
+                               if isinstance(k, ast.Constant) and k.value == 'text'), None)
+                    cls = _fake_text_class(tv, lit_vars)
+                    if cls and n.lineno not in seen:
+                        seen.add(n.lineno)
+                        hits.append((f'{p.name} [text={cls}]', n.lineno, ''))
     return hits
 
 
@@ -154,9 +200,9 @@ def main():
         fails.append('ARCHETYPES-parity')
 
     # [2] قانون 4 — نص احتياطي كتقييم
-    print(f"  [2] قانون 4 (نص احتياطي كتقييم): {'مشبوه ⚠' if fb else 'نظيف'}")
+    print(f"  [2] قانون 4 (فبركة كتقييم — مسح app.py+streamlit_app.py): {'مشبوه ⚠' if fb else 'نظيف'}")
     for h in fb:
-        print(f"      ⚠ {h[0]} @ app.py:{h[1]}  {h[2] if len(h) > 2 else ''}")
+        print(f"      ⚠ {h[0]} @ سطر {h[1]}")
     if fb:
         fails.append('fallback-as-review(Law4)')
 
@@ -167,21 +213,23 @@ def main():
     if danger:
         print(f"      ☠ فرع خطر معروف (لا يُدمج في master): {danger}")
 
-    # [4] لينت عيّنة المخرَج إن وُجدت
-    sample = ROOT / 'SAMPLE_50.txt'
-    if sample.exists():
+    # [4] لينت مخرجات التوليد الحيّة فقط: sample*.txt (يُستثنى SAMPLE_50.txt — وثيقة مرجعية مرقّمة)
+    sample_files = sorted(p for p in ROOT.glob('sample*.txt') if p.name != 'SAMPLE_50.txt')
+    if sample_files:
         bad = []
-        for i, ln in enumerate(sample.read_text(encoding='utf-8').splitlines(), 1):
-            ln = ln.strip()
-            if ln and lint_review(ln):
-                bad.append((i, lint_review(ln), ln[:30]))
-        print(f"  [4] لينت SAMPLE_50.txt: {'نظيف كليًّا' if not bad else str(len(bad)) + ' سطر مخالف'}")
+        for sp in sample_files:
+            for i, ln in enumerate(sp.read_text(encoding='utf-8').splitlines(), 1):
+                ln = ln.strip()
+                if ln and lint_review(ln):
+                    bad.append((sp.name, i, lint_review(ln), ln[:30]))
+        print(f"  [4] لينت مخرجات sample*.txt ({len(sample_files)} ملف): "
+              f"{'نظيف كليًّا' if not bad else str(len(bad)) + ' سطر مخالف'}")
         for b in bad[:8]:
-            print(f"      ⚠ سطر {b[0]}: {b[1]}  «{b[2]}»")
+            print(f"      ⚠ {b[0]}:{b[1]}: {b[2]}  «{b[3]}»")
         if bad:
             fails.append('output-redline')
     else:
-        print('  [4] لينت SAMPLE_50.txt: (غير موجود — تخطّي)')
+        print('  [4] لينت مخرجات sample*.txt: (لا ملف — تخطّي؛ SAMPLE_50.txt مرجع مُستثنى)')
 
     # ── صيغة الحكم الإلزامية (حتمية) ──
     status = 'REJECT' if fails else ('CONDITIONAL' if undoc else 'ACCEPT')

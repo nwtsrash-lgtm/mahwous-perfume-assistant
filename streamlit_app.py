@@ -502,8 +502,9 @@ def gen_reviews(persona, perfumes):
 
         result = ai_call(prompt, 2000)
         if not result:
-            return [{'product': p['name'], 'rating': 5, 'text': _fallback_text(),
-                     'brand': p['brand'], 'price': p['price']} for p in perfumes]
+            # قانون 4: لا نص وهمي — نتوقف ونُظهر خطأ بدل الفبركة.
+            st.error('تعذّر الاتصال بالذكاء الاصطناعي أو نفد الرصيد — لم تتم كتابة أي تقييم.')
+            st.stop()
         try:
             reviews = json.loads(clean_json(result))[:len(perfumes)]
             for i, rv in enumerate(reviews):
@@ -514,8 +515,9 @@ def gen_reviews(persona, perfumes):
             archive_batch(reviews, persona.get('name', ''))
             return reviews
         except Exception:
-            return [{'product': p['name'], 'rating': 5, 'text': _fallback_text(),
-                     'brand': p['brand'], 'price': p['price']} for p in perfumes]
+            # قانون 4: لا نص وهمي — نتوقف ونُظهر خطأ بدل الفبركة.
+            st.error('تعذّر الاتصال بالذكاء الاصطناعي أو نفد الرصيد — لم تتم كتابة أي تقييم.')
+            st.stop()
 
 
 # جوانب متجر متنوّعة — يُختار جانبان لكل تقييم لمنع التكرار (مطابق app.py)
@@ -555,7 +557,9 @@ def gen_store_review(persona):
     rv = ai_write_unique(prompt, max_tokens=200, is_store=True)
     txt = _humanize((rv.get('text') if isinstance(rv, dict) else '') or '')
     if not txt.strip():
-        txt = 'التوصيل سريع والتغليف فخم والعطور أصلية'  # شبكة أمان طبيعية
+        # قانون 4: لا نص وهمي — نتوقف ونُظهر خطأ بدل الفبركة.
+        st.error('تعذّر الاتصال بالذكاء الاصطناعي أو نفد الرصيد — لم تتم كتابة أي تقييم.')
+        st.stop()
     if USE_ANTI_REPEAT:
         ar_register_text(txt, pname)
         try:
