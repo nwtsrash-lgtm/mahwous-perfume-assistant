@@ -202,17 +202,6 @@ def _humanize(text):
 
 
 # شبكة أمان نهائية (تُستخدم فقط لو رجع الـ AI فارغاً تماماً) — نصوص طبيعية لا «ممتاز»
-_FALLBACK_POOL = [
-    'صراحة عجبني وايد وريحته تدوم', 'حلو ومرتب وثباته طويل',
-    'ريحته تفوح وتلفت الانتباه', 'تعاملهم نظيف والمنتج أصلي',
-    'وصل بسرعة والتغليف مرتب',
-]
-
-
-def _fallback_text():
-    return random.choice(_FALLBACK_POOL)
-
-
 def ai_write_unique(prompt, max_tokens, attempts=5, is_store=False, base_temp=0.9, temp_step=0.06):
     """يكتب عبر AI مع منع التكرار: يصعّد الحرارة والتلميح حتى نص فريد.
 
@@ -470,7 +459,9 @@ def gen_reviews(persona, perfumes):
                     pass
             txt = _humanize(txt)
             if not txt.strip():
-                txt = _fallback_text()  # شبكة أمان طبيعية (لا «ممتاز») عند تعذّر الـ AI
+                # قانون 4: لا نص وهمي — نتوقف ونُظهر خطأ بدل الفبركة.
+                st.error('تعذّر الاتصال بالذكاء الاصطناعي أو نفد الرصيد — لم تتم كتابة أي تقييم.')
+                st.stop()
             entry = rv if isinstance(rv, dict) else {}
             entry.update({
                 'product': pf['name'], 'brand': pf['brand'], 'price': pf['price'],

@@ -460,15 +460,9 @@ def _ai_write_json(prompt, max_tokens, attempts=5):
     """
     rv = _ai_unique_json(prompt, max_tokens=max_tokens, attempts=attempts)
     if not rv or not rv.get('text'):
-        # Fallback to prevent empty reviews
-        try:
-            from review_generator import ReviewGenerator
-            gen = ReviewGenerator()
-            # استخراج اسم المنتج إذا أمكن من البرومبت أو وضع قيمة افتراضية
-            fallback_text = gen.generate_reviews("هذا العطر", 200, count=1)[0]['text']
-        except Exception:
-            fallback_text = "روعة بصراحة وثابت"
-        return {'rating': 5, 'text': fallback_text}
+        # قانون 4: عند تعذّر الـ AI (انقطاع/نفاد رصيد) نتوقّف ولا نفبرك تقييمًا.
+        # المستدعون ومعالجات except AIUnavailable يترجمونه إلى 503 عبر _ai_unavailable_response().
+        raise AIUnavailable('AI returned no usable review — stopping (no fabricated fallback, Law 4)')
     return rv
 
 
@@ -695,6 +689,23 @@ ARCHETYPES = [
      'price':(400,2500),'prefers':['نسائي','مشترك'],'count':(3,5)},
     {'id':'ست_بيت','g':'female','label':'ست بيت','emoji':'🏠','age':(30,55),
      'price':(80,400),'prefers':['نسائي','مشترك'],'count':(2,4)},
+    # ── الطبقة 7 — يجب أن تطابق personas_engine.ARCHETYPES (مصيدة #1) ──
+    {'id':'كسول','g':'male','label':'كسول ما يحب يكتب','emoji':'😑','age':(18,55),
+     'price':(0,999),'prefers':['رجالي','مشترك'],'count':(1,1)},
+    {'id':'كسولة','g':'female','label':'كسولة ما تحب تكتب','emoji':'😑','age':(18,55),
+     'price':(0,999),'prefers':['نسائي','مشترك'],'count':(1,1)},
+    {'id':'ناقد_صريح','g':'male','label':'ناقد يقول رأيه بصراحة','emoji':'🤨','age':(25,50),
+     'price':(50,500),'prefers':['رجالي','مشترك'],'count':(1,3)},
+    {'id':'ناقدة_صريحة','g':'female','label':'ناقدة تقول رأيها بصراحة','emoji':'🤨','age':(25,50),
+     'price':(50,500),'prefers':['نسائي','مشترك'],'count':(1,3)},
+    {'id':'متردد','g':'male','label':'متردد كان خايف واكتشف','emoji':'🤔','age':(20,40),
+     'price':(30,300),'prefers':['رجالي','مشترك'],'count':(1,2)},
+    {'id':'مترددة','g':'female','label':'مترددة كانت خايفة واكتشفت','emoji':'🤔','age':(20,40),
+     'price':(30,300),'prefers':['نسائي','مشترك'],'count':(1,2)},
+    {'id':'متذمر_لطيف','g':'male','label':'يشتكي من شي تافه ثم يمدح','emoji':'😂','age':(20,45),
+     'price':(30,400),'prefers':['رجالي','مشترك'],'count':(1,2)},
+    {'id':'متذمرة_لطيفة','g':'female','label':'تشتكي من شي تافه ثم تمدح','emoji':'😂','age':(20,45),
+     'price':(30,400),'prefers':['نسائي','مشترك'],'count':(1,2)},
 ]
 
 # ═══════════ الكتالوج الكامل من ملف المتجر ═══════════
