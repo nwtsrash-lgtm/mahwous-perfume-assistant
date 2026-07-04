@@ -538,6 +538,19 @@ STORE_OPENERS = [
 ]
 
 
+def _strip_store_vocatives(text, persona_name):
+    """حذف حتمي لنداء الاسم من مخرج المتجر: «يا <اسم معروف>» و«يا أبو/أم <كلمة>».
+    محصور في أسماء names.json + اسم الشخصية حتى لا يمسّ «يا سلام/يا رب»."""
+    names = set(NAMES.get('male', []) + NAMES.get('female', []) + NAMES.get('family_names', []))
+    parts = (persona_name or '').split()
+    if parts:
+        names.add(parts[0])
+    for nm in names:
+        text = re.sub(r'يا\s+' + re.escape(nm) + r'(?![ء-ي])', ' ', text)
+    text = re.sub(r'يا\s+(?:أبو|أم)\s+\S+', ' ', text)
+    return re.sub(r'\s+', ' ', text).strip()
+
+
 def gen_store_review(persona):
     """تقييم متجر متنوّع وغير مكرر — يدوّر الجوانب والبداية ويمنع التكرار."""
     pname = persona.get('name')
@@ -558,6 +571,7 @@ def gen_store_review(persona):
     rv = ai_write_unique(prompt, max_tokens=200, is_store=True)
     txt = _humanize((rv.get('text') if isinstance(rv, dict) else '') or '')
     txt = re.sub(r'\s+', ' ', re.sub(r'[0-9٠-٩]+', ' ', txt)).strip()  # ضمان صفر أرقام (مسار المتجر)
+    txt = _strip_store_vocatives(txt, pname)  # منع نداء الاسم حتميًّا
     if not txt.strip():
         # قانون 4: لا نص وهمي — نتوقف ونُظهر خطأ بدل الفبركة.
         st.error('تعذّر الاتصال بالذكاء الاصطناعي أو نفد الرصيد — لم تتم كتابة أي تقييم.')

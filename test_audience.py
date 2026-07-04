@@ -58,11 +58,11 @@ def test_review_patterns():
             count = len(PATTERN_CATEGORIES[cat])
             print(f'   ✅ فئة {cat}: {count} نمط')
     
-    # فحص توزيع النجوم
-    if 1 not in RATING_DISTRIBUTION:
-        issues.append('❌ نجمة واحدة مفقودة من التوزيع')
+    # فحص توزيع النجوم — الأساس المختوم: بلا سلبي (1-2) في التوزيع نفسه
+    if any(r in RATING_DISTRIBUTION for r in (1, 2)):
+        issues.append('❌ توزيع الأساس يحتوي سلبيًا (1-2) — يخالف المعرفة_02')
     else:
-        print(f'   ✅ توزيع النجوم: {RATING_DISTRIBUTION}')
+        print(f'   ✅ توزيع النجوم (بلا سلبي): {RATING_DISTRIBUTION}')
     
     # فحص أسباب التقييم المنخفض
     for rating in [1, 2, 3, 4]:
@@ -77,13 +77,16 @@ def test_review_patterns():
     dist = {r: ratings.count(r) for r in [1, 2, 3, 4, 5]}
     print(f'   📊 توزيع 1000 تقييم: {dist}')
     
-    # فحص وجود نجمة واحدة
-    if dist.get(1, 0) == 0:
-        issues.append('❌ لا يوجد تقييم نجمة واحدة في 1000 محاولة')
-    
-    # فحص أن 5 نجوم ≈ 60%
+    # السلبي (1-2) محصور بالباب الخلفي الديناميكي (~1%) — سقف صارم
+    neg = dist.get(1, 0) + dist.get(2, 0)
+    if neg > 30:
+        issues.append(f'❌ سلبي يتجاوز سقف الباب الخلفي: {neg}/1000')
+    else:
+        print(f'   ✅ السلبي ضمن الباب الخلفي: {neg}/1000')
+
+    # فحص أن 5 نجوم ≈ 74%
     five_pct = dist.get(5, 0) / 10
-    if not (50 <= five_pct <= 70):
+    if not (66 <= five_pct <= 82):
         issues.append(f'❌ نسبة 5 نجوم خارج النطاق: {five_pct}%')
     else:
         print(f'   ✅ نسبة 5 نجوم: {five_pct}%')

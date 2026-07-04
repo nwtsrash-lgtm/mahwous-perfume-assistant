@@ -1,0 +1,321 @@
+{
+  "version": "golden-1.0",
+  "created": "2026-07-04",
+  "temperature": 0.3,
+  "spec": {
+    "ratings": {
+      "5": 22,
+      "4": 7,
+      "3": 1
+    },
+    "emoji_rate": 0.2,
+    "context_rate": 0.3,
+    "reservation_rate": 0.1,
+    "max_words": 4,
+    "similarity_ceiling": 0.8,
+    "negative_backdoor_live": 0.01
+  },
+  "market_reference": {
+    "corpus_file": "competitor_reviews.json",
+    "corpus_texts": 752,
+    "measured_emoji_rate": 0.04,
+    "measured_digit_rate": 0.02,
+    "top_emoji": [
+      "😍",
+      "👍🏻",
+      "❤️",
+      "💎",
+      "👌",
+      "🤩",
+      "🤍",
+      "🔥"
+    ]
+  },
+  "fingerprint": {
+    "count": 30,
+    "ratings": {
+      "5": 22,
+      "4": 7,
+      "3": 1
+    },
+    "emoji_texts": 6,
+    "context_texts": 9,
+    "reservation_texts": 3,
+    "avg_words": 2.73,
+    "unique_first_words": 18,
+    "guard_violations": 0,
+    "duplicates": 0
+  },
+  "reviews": [
+    {
+      "text": "عطار يسحر الأنفاس",
+      "rating": 5,
+      "emoji": "",
+      "context": false,
+      "reservation": false,
+      "product": "عطر عساف مس ساكورا أو دو برفيوم 200 مل",
+      "source": "pool"
+    },
+    {
+      "text": "جميل بس ودي يثبت",
+      "rating": 4,
+      "emoji": "",
+      "context": false,
+      "reservation": true,
+      "product": "",
+      "source": "topup"
+    },
+    {
+      "text": "ريحته حلوة مرة",
+      "rating": 4,
+      "emoji": "",
+      "context": false,
+      "reservation": false,
+      "product": "عطر كربتك نوماد إكستري أودي بارفيوم 100 مل للجنسين",
+      "source": "pool"
+    },
+    {
+      "text": "ريحته تجيب العيد",
+      "rating": 5,
+      "emoji": "",
+      "context": true,
+      "reservation": false,
+      "product": "عطر كيوبيد نمبر 6 أو دو بارفيوم 50 مل للجنسين",
+      "source": "pool"
+    },
+    {
+      "text": "ريحتها تملي العمارة 🔥",
+      "rating": 5,
+      "emoji": "🔥",
+      "context": false,
+      "reservation": false,
+      "product": "عطر كربتك إيكلا فيوليت إكستري أودي بارفيوم 100 مل للنساء",
+      "source": "targeted:context"
+    },
+    {
+      "text": "حلو بس فوحانه خفيف",
+      "rating": 4,
+      "emoji": "",
+      "context": false,
+      "reservation": true,
+      "product": "",
+      "source": "topup"
+    },
+    {
+      "text": "عجبني بالحيل",
+      "rating": 5,
+      "emoji": "",
+      "context": false,
+      "reservation": false,
+      "product": "عطر فيكتوريوه كريبتك أو دو بارفيوم 100 مل للجنسين | VICTORIEUX CRYPTIC",
+      "source": "pool"
+    },
+    {
+      "text": "حلو بس عادي",
+      "rating": 3,
+      "emoji": "",
+      "context": false,
+      "reservation": true,
+      "product": "عطر كربتك إيكلا فيوليت إكستري أودي بارفيوم 100 مل للنساء",
+      "source": "pool"
+    },
+    {
+      "text": "عطر يفتح النفس",
+      "rating": 5,
+      "emoji": "",
+      "context": false,
+      "reservation": false,
+      "product": "عطر هيرمس أو دو ميرفيل او دو تواليت 100مل",
+      "source": "pool"
+    },
+    {
+      "text": "رهيب للمشاوير فواح",
+      "rating": 5,
+      "emoji": "",
+      "context": true,
+      "reservation": false,
+      "product": "",
+      "source": "topup"
+    },
+    {
+      "text": "خيال للطلعات",
+      "rating": 5,
+      "emoji": "",
+      "context": true,
+      "reservation": false,
+      "product": "",
+      "source": "topup"
+    },
+    {
+      "text": "ريحته تملأ المصعد",
+      "rating": 4,
+      "emoji": "",
+      "context": true,
+      "reservation": false,
+      "product": "عطر بولغاري مان وود نيرولي أو دو بارفيوم 100 مل",
+      "source": "pool"
+    },
+    {
+      "text": "يجنن",
+      "rating": 4,
+      "emoji": "",
+      "context": false,
+      "reservation": false,
+      "product": "عطر كربتك روج أبسولو إكستري أودي بارفيوم 100 مل للجنسين",
+      "source": "pool"
+    },
+    {
+      "text": "فخم لصلاة الجمعة",
+      "rating": 5,
+      "emoji": "",
+      "context": true,
+      "reservation": false,
+      "product": "",
+      "source": "topup"
+    },
+    {
+      "text": "يستاهل كل نجمة",
+      "rating": 5,
+      "emoji": "",
+      "context": false,
+      "reservation": false,
+      "product": "عطر كربتك روج أبسولو إكستري أودي بارفيوم 100 مل للجنسين",
+      "source": "pool"
+    },
+    {
+      "text": "فخم ويصمل 😍",
+      "rating": 5,
+      "emoji": "😍",
+      "context": false,
+      "reservation": false,
+      "product": "تستر كارتييه لابانتير أو دو بارفيوم 75 مل للنساء",
+      "source": "pool"
+    },
+    {
+      "text": "عطر يطرب الراس",
+      "rating": 5,
+      "emoji": "",
+      "context": false,
+      "reservation": false,
+      "product": "عطر فندي بور هوم أسولتو أو دو توليت 100مل",
+      "source": "pool"
+    },
+    {
+      "text": "فواح وريحته تجنن",
+      "rating": 5,
+      "emoji": "",
+      "context": false,
+      "reservation": false,
+      "product": "عطر توري بورش سبلايم روز أو دو بارفيوم 90مل (نسائي)",
+      "source": "pool"
+    },
+    {
+      "text": "خرافي للسهرة",
+      "rating": 5,
+      "emoji": "",
+      "context": true,
+      "reservation": false,
+      "product": "",
+      "source": "topup"
+    },
+    {
+      "text": "يجنننن يابعد حيي",
+      "rating": 5,
+      "emoji": "",
+      "context": false,
+      "reservation": false,
+      "product": "معطر للشعر مارلي ديلينا بارفيوم  معطر للشعر 75 مل",
+      "source": "pool"
+    },
+    {
+      "text": "ريحته فخمة",
+      "rating": 4,
+      "emoji": "",
+      "context": false,
+      "reservation": false,
+      "product": "عطر كربتك روج أبسولو إكستري أودي بارفيوم 100 مل للجنسين",
+      "source": "targeted:context"
+    },
+    {
+      "text": "ريحتو تملى المسجد",
+      "rating": 5,
+      "emoji": "",
+      "context": true,
+      "reservation": false,
+      "product": "عطر كربتك نوماد إكستري أودي بارفيوم 100 مل للجنسين",
+      "source": "pool"
+    },
+    {
+      "text": "عطر يجنن 😍",
+      "rating": 5,
+      "emoji": "😍",
+      "context": false,
+      "reservation": false,
+      "product": "عطر جيرلان ميتسوكو أو دو بارفيوم 75مل",
+      "source": "pool"
+    },
+    {
+      "text": "جبار بكل مكان 👍🏻",
+      "rating": 5,
+      "emoji": "👍🏻",
+      "context": false,
+      "reservation": false,
+      "product": "عطر كربتك روج أبسولو إكستري أودي بارفيوم 100 مل للجنسين",
+      "source": "pool"
+    },
+    {
+      "text": "ريحته فواحة بالمسجد",
+      "rating": 5,
+      "emoji": "",
+      "context": true,
+      "reservation": false,
+      "product": "عطر فيكتوريوه كريبتك أو دو بارفيوم 100 مل للجنسين | VICTORIEUX CRYPTIC",
+      "source": "targeted:context"
+    },
+    {
+      "text": "فواح ويصمل ❤️",
+      "rating": 5,
+      "emoji": "❤️",
+      "context": false,
+      "reservation": false,
+      "product": "عطر كربتك شادو ليف إكستري أودي بارفيوم 100 مل للجنسين",
+      "source": "pool"
+    },
+    {
+      "text": "ريحته تعبي المسجد 👌",
+      "rating": 5,
+      "emoji": "👌",
+      "context": true,
+      "reservation": false,
+      "product": "عطر إبراهيم القرشي التوباكو الكوبي إبراق أو دو بارفيوم 100مل (للجنسين)",
+      "source": "pool"
+    },
+    {
+      "text": "ريحته تبرد الخاطر",
+      "rating": 4,
+      "emoji": "",
+      "context": false,
+      "reservation": false,
+      "product": "عطر ايسي مياكي لو ديسي بور هوم سبورت أو دو تواليت 100مل",
+      "source": "pool"
+    },
+    {
+      "text": "فخممم وريحته تدوخ",
+      "rating": 5,
+      "emoji": "",
+      "context": false,
+      "reservation": false,
+      "product": "عطر كربتك كلارتيه إكستري أودي بارفيوم 100 مل للجنسين",
+      "source": "pool"
+    },
+    {
+      "text": "فواح ويثبت",
+      "rating": 5,
+      "emoji": "",
+      "context": false,
+      "reservation": false,
+      "product": "عطر نولو ألفريد ريتشي أو دو برفيوم 100 مل",
+      "source": "pool"
+    }
+  ]
+}

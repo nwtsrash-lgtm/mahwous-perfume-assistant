@@ -13,6 +13,7 @@ guardian.py — الحارس التنفيذي للعقل المدبّر (v4)
 - يخرج برمز 1 إذا سقط أي فحص حرِج (صالح لبوابة CI).
 """
 import ast
+import json
 import re
 import sys
 import subprocess
@@ -172,6 +173,63 @@ def lint_review(text):
     return v
 
 
+# ──────────── العينة الذهبية — فحص البصمة مقابل المواصفة ────────────
+def check_golden_sample():
+    """مصيدة #5: golden_sample.json يجب أن يطابق مواصفته المختومة حرفيًا.
+
+    الإيموجي هنا ليس خطًّا أحمر بل حصة مقنّنة (spec.emoji_rate) — الدستور المعدَّل.
+    الأرقام تبقى خطًّا أحمر. النزيف الدلالي والبتر والتكرار = رفض.
+    يرجع None إذا لا ملف (تخطٍّ)، وإلا قائمة مشاكل (فارغة = PASS).
+    """
+    p = ROOT / 'golden_sample.json'
+    if not p.exists():
+        return None
+    try:
+        from semantic_guard import guard_violations, has_context, has_reservation
+    except ImportError:
+        return ['semantic_guard.py مفقود — لا يمكن فحص الذهب']
+    d = json.loads(p.read_text(encoding='utf-8'))
+    reviews, spec = d.get('reviews', []), d.get('spec', {})
+    problems = []
+    if len(reviews) != 30:
+        problems.append(f'العدد {len(reviews)} ≠ 30')
+    want = {int(k): v for k, v in spec.get('ratings', {}).items()}
+    got = {}
+    seen = set()
+    emoji_n = 0
+    for i, r in enumerate(reviews, 1):
+        text, rating = r.get('text', ''), int(r.get('rating', 0))
+        got[rating] = got.get(rating, 0) + 1
+        if rating < 3:
+            problems.append(f'#{i}: نجوم سلبية {rating} داخل الذهب')
+        if _EMOJI.search(text):
+            emoji_n += 1
+        if _DIGIT.search(text):
+            problems.append(f'#{i}: أرقام (خط أحمر) «{text[:24]}»')
+        gv = guard_violations(text, max_words=spec.get('max_words', 4))
+        if gv:
+            problems.append(f'#{i}: {"/".join(gv)} «{text[:24]}»')
+        key = ' '.join(text.split())
+        if key in seen:
+            problems.append(f'#{i}: استنساخ حرفي «{text[:24]}»')
+        seen.add(key)
+    if want and got != want:
+        problems.append(f'توزيع النجوم {got} ≠ المواصفة {want}')
+    quota = round(len(reviews) * spec.get('emoji_rate', 0))
+    if emoji_n != quota:
+        problems.append(f'إيموجي {emoji_n} ≠ الحصة {quota}')
+    # الحصص العاطفية — تُعاد قراءتها من النصوص نفسها (لا من أعلام مخزّنة قابلة للتلفيق)
+    ctx_n = sum(1 for r in reviews if has_context(r.get('text', '')))
+    res_n = sum(1 for r in reviews if has_reservation(r.get('text', '')))
+    ctx_q = round(len(reviews) * spec.get('context_rate', 0))
+    res_q = round(len(reviews) * spec.get('reservation_rate', 0))
+    if ctx_n < ctx_q:
+        problems.append(f'سياق استخدام {ctx_n} < الحصة {ctx_q}')
+    if res_n < res_q:
+        problems.append(f'تحفّظ إيجابي {res_n} < الحصة {res_q}')
+    return problems
+
+
 # ───────────────────────── main ─────────────────────────
 def main():
     g = git_stamp()
@@ -230,6 +288,17 @@ def main():
             fails.append('output-redline')
     else:
         print('  [4] لينت مخرجات sample*.txt: (لا ملف — تخطّي؛ SAMPLE_50.txt مرجع مُستثنى)')
+
+    # [5] العينة الذهبية — البصمة مقابل المواصفة
+    golden = check_golden_sample()
+    if golden is None:
+        print('  [5] العينة الذهبية golden_sample.json: (لا ملف — تخطّي)')
+    else:
+        print(f"  [5] العينة الذهبية golden_sample.json: {'مطابقة للمواصفة 🏆' if not golden else str(len(golden)) + ' مخالفة'}")
+        for pr in golden[:8]:
+            print(f'      ⚠ {pr}')
+        if golden:
+            fails.append('golden-sample')
 
     # ── صيغة الحكم الإلزامية (حتمية) ──
     status = 'REJECT' if fails else ('CONDITIONAL' if undoc else 'ACCEPT')

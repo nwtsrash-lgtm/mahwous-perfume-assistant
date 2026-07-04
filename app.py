@@ -106,6 +106,14 @@ except ImportError:
     print('\u26a0\ufe0f anti_repeat not found')
 
 try:
+    from semantic_guard import guard_violations, strip_broken_tail
+    USE_SEMANTIC_GUARD = True
+    print('\u2705 semantic_guard loaded')
+except ImportError:
+    USE_SEMANTIC_GUARD = False
+    print('\u26a0\ufe0f semantic_guard not found')
+
+try:
     from trending import calculate_product_weight, get_trending_names, blend_selection
     USE_TRENDING = True
     print('\u2705 trending loaded')
@@ -522,6 +530,20 @@ def _write_review(persona, pf, prompt, params):
         mx = REVIEW_PATTERNS.get(params.get('pattern', ''), {}).get('words', (1, 20))[1]
     max_tokens = 80 + mx * 8
     rv = _ai_write_json(prompt, max_tokens=max_tokens, attempts=5)  # يرفع AIUnavailable عند الفشل
+    # ══ الحارس الدلالي: نزيف/بتر/تجاوز طول → إعادة توليد بدل القصّ الصامت ══
+    if USE_SEMANTIC_GUARD:
+        for _k in range(2):
+            _t = _humanize(rv.get('text', ''))
+            _viol = guard_violations(_t, max_words=4)
+            if not _viol:
+                break
+            _hint = (f'\n\n⚠️ رُفض النص السابق «{_t}» ({"، ".join(_viol)}). '
+                     'اكتب تقييماً جديداً عن العطر نفسه فقط، جملة مكتملة المعنى، ٤ كلمات كحد أقصى.')
+            _nxt = _ai_unique_json(prompt + _hint, max_tokens=max_tokens, attempts=2)
+            if _nxt and _nxt.get('text'):
+                rv['text'] = _nxt['text']
+            else:
+                break
     rv['price'] = pf['price']
     rv['brand'] = pf['brand']
     rv['pg'] = pf['g']
@@ -532,10 +554,13 @@ def _write_review(persona, pf, prompt, params):
         rv['text'] = apply_typos(rv['text'], probability=1.0)
     # تنظيف نهائي: نص بشري متدفّق بلا ترقيم أو رموز (ضمان مطلق)
     rv['text'] = _humanize(rv.get('text', ''))
-    # ══ قص إجباري: 4 كلمات بحد أقصى ══
+    # ══ قص أخير: 4 كلمات بحد أقصى + إنقاذ الذيل المبتور (لا شظايا) ══
     _words = rv['text'].split()
     if len(_words) > 4:
-        rv['text'] = ' '.join(_words[:4])
+        _words = _words[:4]
+    if USE_SEMANTIC_GUARD:
+        _words = strip_broken_tail(_words)
+    rv['text'] = ' '.join(_words)
 
     if USE_AR_TRACK:
         ar_track_pattern(params.get('pattern', 'default'))
@@ -581,6 +606,19 @@ STORE_OPENERS = [
 ]
 
 
+def _strip_store_vocatives(text, persona_name):
+    """حذف حتمي لنداء الاسم من مخرج المتجر: «يا <اسم معروف>» و«يا أبو/أم <كلمة>».
+    محصور في أسماء names.json + اسم الشخصية حتى لا يمسّ «يا سلام/يا رب»."""
+    names = set(NAMES.get('male', []) + NAMES.get('female', []) + NAMES.get('family_names', []))
+    parts = (persona_name or '').split()
+    if parts:
+        names.add(parts[0])
+    for nm in names:
+        text = re.sub(r'يا\s+' + re.escape(nm) + r'(?![ء-ي])', ' ', text)
+    text = re.sub(r'يا\s+(?:أبو|أم)\s+\S+', ' ', text)
+    return re.sub(r'\s+', ' ', text).strip()
+
+
 def _ai_store_review(persona):
     """تقييم متجر متنوّع وغير مكرر — يدوّر الجوانب والبداية ويمنع التكرار."""
     aspects = random.sample(STORE_ASPECTS, k=2)
@@ -608,6 +646,7 @@ def _ai_store_review(persona):
     rv = _ai_write_json(prompt, max_tokens=200, attempts=5)  # يرفع AIUnavailable عند الفشل
     rv['text'] = _humanize(rv.get('text', ''))  # بلا ترقيم أو رموز
     rv['text'] = re.sub(r'\s+', ' ', re.sub(r'[0-9٠-٩]+', ' ', rv['text'])).strip()  # ضمان صفر أرقام (مسار المتجر)
+    rv['text'] = _strip_store_vocatives(rv['text'], persona.get('name'))  # منع نداء الاسم حتميًّا
     _register(rv['text'])
     if USE_ANTI_REPEAT:
         try:

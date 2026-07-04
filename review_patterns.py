@@ -4,6 +4,7 @@
 كل نمط يحتوي ai_directive — توجيه مباشر للـ AI بدلاً من الاختيار العشوائي
 Review Patterns Engine V2
 """
+import os
 import sys
 import random
 
@@ -764,7 +765,10 @@ for _name, _info in REVIEW_PATTERNS.items():
 # ═══════════════════════════════════════════════════════════
 
 # توزيع واقعي يطابق المتاجر الحقيقية (قولدن سنت، نايس ون)
-RATING_DISTRIBUTION = {5: 60, 4: 22, 3: 12, 2: 4, 1: 2}
+RATING_DISTRIBUTION = {5: 74, 4: 22, 3: 4}
+
+# باب خلفي ديناميكي: نسبة سلبي (1-2★) ضئيلة للتنوع — يُعطَّل بـ NEGATIVE_BACKDOOR=0
+NEGATIVE_BACKDOOR = float(os.environ.get('NEGATIVE_BACKDOOR', '0.01'))
 
 LOW_RATING_REASONS = {
     4: ['حلو بس الفوحان يخف بعد 3 ساعات', 'ريحته حلوة بس التغليف بسيط',
@@ -836,7 +840,9 @@ def pick_pattern_from_category(category, used_patterns=None):
 
 
 def pick_rating():
-    """اختيار تقييم نجوم بناءً على التوزيع الواقعي"""
+    """اختيار تقييم نجوم بناءً على التوزيع الواقعي + باب خلفي سلبي ديناميكي"""
+    if NEGATIVE_BACKDOOR > 0 and random.random() < NEGATIVE_BACKDOOR:
+        return random.choices([2, 1], weights=[2, 1], k=1)[0]
     ratings = list(RATING_DISTRIBUTION.keys())
     weights = list(RATING_DISTRIBUTION.values())
     return random.choices(ratings, weights=weights, k=1)[0]
