@@ -1,0 +1,76 @@
+# -*- coding: utf-8 -*-
+"""اختبارات معاير الواقعية وخيط الطول المعاين عبر المنظومة.
+
+تحرس: قراءة الكشط الشامل، سقف المسار الحي، توجيه الطول في البرومبت،
+وحقن len_target في generate_review_params — قلب «التوحيد الشامل».
+"""
+import random
+
+import realism_calibrator as rc
+from personas_engine import generate_persona, generate_review_params, build_master_prompt
+
+
+def test_pool_loads_full_corpus():
+    """البركة تُقرأ من competitor_reviews_full.json — 452 نصًّا لا 263."""
+    pool = rc.load_length_pool()
+    assert len(pool) == 452
+
+
+def test_sample_respects_live_cap():
+    """سقف المسار الحي يقصّ الذيل النادر (63-89 كلمة)."""
+    pool = rc.load_length_pool()
+    random.seed(1)
+    for _ in range(2000):
+        assert 1 <= rc.sample_target_length(pool, cap=rc.LIVE_MAX_TARGET) <= rc.LIVE_MAX_TARGET
+
+
+def test_length_directive_shapes():
+    assert 'كلمة واحدة' in rc.length_directive(1)
+    assert '4' in rc.length_directive(4)
+    assert 'جملة عفوية واحدة' in rc.length_directive(7)
+    assert 'جملتان' in rc.length_directive(20)
+
+
+def test_review_params_carry_len_target():
+    random.seed(2)
+    p = generate_persona()
+    for _ in range(50):
+        params = generate_review_params(p)
+        t = params.get('len_target')
+        assert t is not None and 1 <= t <= rc.LIVE_MAX_TARGET
+
+
+def test_prompt_follows_len_target():
+    """البرومبت يتبع الطول المعاين: القصير يُلزم بالقصر والطويل يتحرر من سقف الـ4."""
+    p = generate_persona()
+    params = generate_review_params(p)
+
+    params['len_target'] = 2
+    prompt, _ = build_master_prompt(p, 'عطر تجريبي', params)
+    assert 'من 1 إلى 2' in prompt and 'التزم بنفس القصر' in prompt
+
+    params['len_target'] = 12
+    prompt, _ = build_master_prompt(p, 'عطر تجريبي', params)
+    assert 'حوالي 12' in prompt
+    assert 'لا أكثر أبداً' not in prompt
+    assert 'للأسلوب واللهجة فقط' in prompt
+
+
+def test_prompt_fallback_without_target():
+    """بلا len_target: السلوك القديم (سقف 4 كلمات) — طريق عودة سليم."""
+    p = generate_persona()
+    params = generate_review_params(p)
+    params.pop('len_target', None)
+    prompt, _ = build_master_prompt(p, 'عطر تجريبي', params)
+    assert 'لا أكثر أبداً' in prompt
+
+
+def test_target_distribution_matches_real():
+    """توزيع 3000 عيّنة يقارب شرائح المنافسين الحقيقية (تفاوت ±5%)."""
+    pool = rc.load_length_pool()
+    random.seed(3)
+    samples = [rc.sample_target_length(pool, cap=rc.LIVE_MAX_TARGET) for _ in range(3000)]
+    share_1 = sum(1 for s in samples if s == 1) / len(samples)
+    share_long = sum(1 for s in samples if s >= 5) / len(samples)
+    assert abs(share_1 - 0.27) < 0.05      # 27% كلمة واحدة عند المنافسين
+    assert abs(share_long - 0.36) < 0.05   # 36% خمس كلمات فأكثر
