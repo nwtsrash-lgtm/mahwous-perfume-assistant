@@ -511,62 +511,82 @@ def gen_reviews(persona, perfumes):
         st.stop()
 
 
-# جوانب متجر متنوّعة — يُختار جانبان لكل تقييم لمنع التكرار (مطابق app.py)
-STORE_ASPECTS = [
-    'سرعة التوصيل — وصل قبل الموعد', 'فخامة التغليف — فقاعات وكرتون مزدوج',
-    'أصالة العطور 100%', 'خدمة العملاء — ردوا علي بسرعة',
-    'الأسعار — أرخص من المحلات', 'سهولة الطلب والدفع',
-    'العينات المجانية — جاني عينات مع الطلب', 'الكرت الشخصي مع الطلب',
-    'التغليف المحمي ضد الكسر', 'التقسيط — تابي وتمارا بدون فوائد',
-    'تتبع الطلب — كل خطوة واضحة',
-]
-STORE_OPENERS = [
-    'ابدأ بانطباعك المباشر عن تجربة الشراء',
-    'ابدأ بذكر آخر طلب وصلك وكيف كان',
-    'ابدأ بمقارنة بسيطة مع متاجر ثانية تعاملت معها',
-    'ابدأ بردة فعلك أول ما فتحت الطلب',
-    'ابدأ بنصيحة لغيرك يطلب من المتجر',
-]
+# تقييم المتجر — يستورد المنطق المرجعي من الوحدة المشتركة store_review
+# (نفس بيانات وبرومبت وحُرّاس app.py — مصدر واحد، فلا يتباعد المساران)
+from store_review import (
+    STORE_ASPECTS, STORE_OPENERS, ASPECT_TOPIC,
+    sample_length_target, band_for, build_store_prompt,
+    strip_store_vocatives, has_luxury_metaphor, scrub_luxury_metaphor,
+    StoreTopicTracker,
+)
 
-
-def _strip_store_vocatives(text, persona_name):
-    """حذف حتمي لنداء الاسم من مخرج المتجر: «يا <اسم معروف>» و«يا أبو/أم <كلمة>».
-    محصور في أسماء names.json + اسم الشخصية حتى لا يمسّ «يا سلام/يا رب»."""
-    names = set(NAMES.get('male', []) + NAMES.get('female', []) + NAMES.get('family_names', []))
-    parts = (persona_name or '').split()
-    if parts:
-        names.add(parts[0])
-    for nm in names:
-        text = re.sub(r'يا\s+' + re.escape(nm) + r'(?![ء-ي])', ' ', text)
-    text = re.sub(r'يا\s+(?:أبو|أم)\s+\S+', ' ', text)
-    return re.sub(r'\s+', ' ', text).strip()
+# أسماء معروفة لحذف نداء الاسم + عدّاد مواضيع المتجر لهذه الجلسة (سقف 20%)
+_STORE_NAMES = set(NAMES.get('male', []) + NAMES.get('female', []) + NAMES.get('family_names', []))
+_store_topics = StoreTopicTracker()
 
 
 def gen_store_review(persona):
-    """تقييم متجر متنوّع وغير مكرر — يدوّر الجوانب والبداية ويمنع التكرار."""
+    """تقييم متجر متنوّع وغير مكرر — بالمنطق المرجعي الموحّد من store_review:
+    طول مُعايَن (35/40/25)، برومبت متكيّف مع النطاق، سقف موضوعي 20%، وحظر
+    استعارات الفخامة وحذف نداء الاسم. نفس مسار app.py حرفيًّا كي يتناغم الطرفان."""
     pname = persona.get('name')
-    aspects = random.sample(STORE_ASPECTS, k=2)
+    # (1) طول مُعايَن قبل البرومبت  (2) جوانب بعيدًا عن المواضيع المشبعة
+    lo, hi, length_desc = sample_length_target()
+    band = band_for(hi)
+    blocked = _store_topics.blocked()
+    pool = [a for a in STORE_ASPECTS if ASPECT_TOPIC.get(a) not in blocked]
+    if len(pool) < 2:
+        pool = list(STORE_ASPECTS)
+    aspects = random.sample(pool, k=2)
     opener = random.choice(STORE_OPENERS)
     ub = ar_format_used(15, persona_name=pname) if USE_ANTI_REPEAT else ''
-    prompt = f"""اكتب تقييم قصير (من ثمان إلى ست عشرة كلمة) لمتجر "مهووس للعطور" بلهجة سعودية عامية.
-أنت العميل نفسه ({persona['label']}، عمره {persona['age']}، من {persona['city']}) تكتب تقييمك بصيغة المتكلّم عن تجربتك.
-## ركّز على هذين الجانبين تحديداً (لا غيرهما): {aspects[0]} و{aspects[1]}.
-## قواعد:
-- {opener}
-- لا تبدأ بكلمة "متجر" ولا بنفس الصيغ الجاهزة الشائعة
-- لهجة سعودية عفوية، بدون فصحى، وبدون أي علامات ترقيم أو رموز أو أرقام
-- لا تُخاطب أحدًا بالاسم ولا تستعمل نداءً («يا فلان»)، ولا تذكر اسمك في النص
-- لا تكرر أياً من هذه الصياغات السابقة:
-{ub if ub else '(لا يوجد سابق)'}
-أرجع JSON فقط: {{"rating": 5, "text": "..."}}"""
+    avoid_line = (f"\n- ممنوع الحديث عن: {'، '.join(sorted(blocked))} (تكرّرت كثيرًا)" if blocked else '')
+    prompt = build_store_prompt(persona, band, aspects, opener, ub, avoid_line)
+
+    def _finalize(text):
+        text = _humanize(text or '')  # بلا ترقيم أو رموز
+        text = re.sub(r'\s+', ' ', re.sub(r'[0-9٠-٩]+', ' ', text)).strip()  # صفر أرقام
+        return strip_store_vocatives(text, pname, _STORE_NAMES)  # منع النداء حتميًّا
+
     rv = ai_write_unique(prompt, max_tokens=200, is_store=True)
-    txt = _humanize((rv.get('text') if isinstance(rv, dict) else '') or '')
-    txt = re.sub(r'\s+', ' ', re.sub(r'[0-9٠-٩]+', ' ', txt)).strip()  # ضمان صفر أرقام (مسار المتجر)
-    txt = _strip_store_vocatives(txt, pname)  # منع نداء الاسم حتميًّا
+    txt = _finalize(rv.get('text') if isinstance(rv, dict) else '')
+
+    # (3) حارس موحّد: استعارة فخامة / موضوع مشبع / تجاوز الطول → إعادة توليد موجَّهة
+    for _k in range(3):
+        problems = []
+        if has_luxury_metaphor(txt):
+            problems.append('استعارة فخامة (كنز/صندوق/مجوهرات/ذهب) ممنوعة')
+        blocked_now = _store_topics.blocked()
+        if _store_topics.classify(txt) in blocked_now:
+            fresh = [a for a in STORE_ASPECTS if ASPECT_TOPIC.get(a) not in blocked_now]
+            alt = random.choice(fresh or STORE_ASPECTS)
+            problems.append(f"موضوع «{_store_topics.classify(txt)}» تكرّر كثيرًا؛ اكتب عن {alt} بدلًا منه ولا تذكره")
+        if len(txt.split()) > hi + 2:
+            problems.append(f"أطل من المطلوب؛ التزم بـ {length_desc}")
+        if not problems:
+            break
+        hint = "\n\n⚠️ أعد الكتابة: " + " · ".join(problems)
+        nxt = ai_write_unique(prompt + hint, max_tokens=200, is_store=True)
+        if not (isinstance(nxt, dict) and nxt.get('text')):
+            break
+        txt = _finalize(nxt['text'])
+
+    # (4) ضمانات حتمية: صفر استعارة فخامة + احترام سقف نطاق الطول
+    txt = scrub_luxury_metaphor(txt)
+    words = txt.split()
+    if len(words) > hi:
+        words = words[:hi]
+        if USE_SEMANTIC_GUARD:
+            words = strip_broken_tail(words)
+    txt = ' '.join(words)
+
     if not txt.strip():
         # قانون 4: لا نص وهمي — نتوقف ونُظهر خطأ بدل الفبركة.
         st.error('تعذّر الاتصال بالذكاء الاصطناعي أو نفد الرصيد — لم تتم كتابة أي تقييم.')
         st.stop()
+
+    # (5) تسجيل الموضوع + الأرشيف
+    _store_topics.record(txt)
     if USE_ANTI_REPEAT:
         ar_register_text(txt, pname)
         try:

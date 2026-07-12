@@ -83,3 +83,15 @@ def test_topic_tracker_reset():
     tr.record('توصيل سريع')
     tr.reset()
     assert tr.total == 0 and all(v == 0 for v in tr.counts.values())
+
+
+def test_app_binds_shared_store_module():
+    """حارس التناغم: app.py يستورد منطق المتجر من store_review (لا نسخة inline).
+
+    يمنع عودة الازدواج الذي كان يُبعد مسار Flask عن Streamlit.
+    """
+    import app
+    assert app.STORE_ASPECTS is sr.STORE_ASPECTS
+    assert app.build_store_prompt is sr.build_store_prompt
+    assert app.strip_store_vocatives is sr.strip_store_vocatives
+    assert isinstance(app._store_topics, sr.StoreTopicTracker)
