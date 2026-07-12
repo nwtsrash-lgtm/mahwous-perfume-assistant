@@ -20,6 +20,21 @@ try:
 except ImportError:
     _DEMO_MATCH = False
 
+# معاير الواقعية (اختياري) — طول التقييم يُعايَن من بيانات المنافسين
+# الحقيقية (competitor_reviews_full.json) بدل سقف الـ4 كلمات الثابت.
+try:
+    from realism_calibrator import (
+        load_length_pool as _rc_load_pool,
+        sample_target_length as _rc_sample,
+        length_directive as _rc_directive,
+        LIVE_MAX_TARGET as _RC_CAP,
+    )
+    _LEN_POOL = _rc_load_pool()
+    _REALISM = len(_LEN_POOL) >= 30
+except Exception:
+    _REALISM = False
+    _LEN_POOL = []
+
 # ═══════════════════════════════════════════════════════════
 #  تحميل الأسماء
 # ═══════════════════════════════════════════════════════════
@@ -1248,12 +1263,17 @@ def generate_review_params(persona):
     pattern_desc = get_pattern_description(pattern)
     low_reason = get_low_rating_reason(rating) if rating <= 3 else ''
 
-    return {
+    params = {
         'pattern': pattern,
         'pattern_desc': pattern_desc,
         'rating': rating,
         'low_reason': low_reason,
     }
+    # الطول المستهدف يُعايَن من توزيع المنافسين الحقيقي — لا من النمط
+    # (64% قصير 1-4 كلمات، 36% أطول حتى 34 — «الحمض النووي» المرصود)
+    if _REALISM:
+        params['len_target'] = _rc_sample(_LEN_POOL, cap=_RC_CAP)
+    return params
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1265,12 +1285,12 @@ def generate_review_params(persona):
 #  4. الـ AI يتلقى "مهمة" لا مجرد وصف نمط
 # ═══════════════════════════════════════════════════════════
 
-MASTER_PROMPT = """اكتب تقييم عطر من 1 إلى 4 كلمات فقط بلهجة سعودية عامية.
+MASTER_PROMPT = """اكتب تقييم عطر بلهجة سعودية عامية. {length_rule}.
 
 المنتج: {product_name}
 التقييم: {rating} نجوم
 
-## أمثلة (التزم بنفس القصر):
+## أمثلة ({examples_note}):
 - ممتاز
 - يستاهل كل ريال
 - ريحته ثابتة
@@ -1285,7 +1305,7 @@ MASTER_PROMPT = """اكتب تقييم عطر من 1 إلى 4 كلمات فقط 
 - ريحة فخمة
 
 ## القواعد:
-- من 1 إلى {max_words} كلمات فقط لا أكثر أبداً
+- {length_rule}
 - لهجة سعودية عامية مو فصحى
 - بدون أي ترقيم أو إيموجي
 - لا تذكر اسم المنتج
@@ -1358,20 +1378,30 @@ def build_context_hints(persona, product):
 
 
 def build_master_prompt(persona, product_name, review_params, used_texts_block='', extra_block=''):
-    """بناء برومبت قصير — 4 كلمات بحد أقصى."""
-    pattern_info = REVIEW_PATTERNS.get(review_params['pattern'],
-                                       REVIEW_PATTERNS.get('ultra_short', {'words': (1, 3)}))
-    _min_words, max_words = pattern_info.get('words', (1, 3))
-    # أقصى حد مطلق: 4 كلمات
-    if max_words > 4:
-        max_words = 4
+    """بناء البرومبت — الطول من len_target المعاين من بيانات المنافسين.
+
+    عند غياب المعاير (len_target) نتدرّج للسلوك القديم: 4 كلمات بحد أقصى.
+    """
+    len_target = review_params.get('len_target')
+    if len_target:
+        length_rule = _rc_directive(len_target)
+        examples_note = ('التزم بنفس القصر' if len_target <= 4
+                         else 'للأسلوب واللهجة فقط — طولك المطلوب أعلاه مختلف')
+    else:
+        pattern_info = REVIEW_PATTERNS.get(review_params['pattern'],
+                                           REVIEW_PATTERNS.get('ultra_short', {'words': (1, 3)}))
+        _min_words, max_words = pattern_info.get('words', (1, 3))
+        max_words = min(max_words, 4)  # السلوك القديم: أقصى حد مطلق 4 كلمات
+        length_rule = f'من 1 إلى {max_words} كلمات فقط لا أكثر أبداً'
+        examples_note = 'التزم بنفس القصر'
 
     typo_rule = 'أضف خطأ إملائي طبيعي واحد' if persona.get('has_typo') else 'بدون أخطاء إملائية'
 
     prompt = MASTER_PROMPT.format(
         product_name=product_name,
         rating=review_params['rating'],
-        max_words=max_words,
+        length_rule=length_rule,
+        examples_note=examples_note,
         typo_rule=typo_rule,
         used_texts_block=used_texts_block if used_texts_block else '(لا يوجد سابق)',
     )
