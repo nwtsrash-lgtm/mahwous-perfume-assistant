@@ -122,6 +122,14 @@ except ImportError:
     print('\u26a0\ufe0f trending not found')
 
 try:
+    import demographic_matcher as _demo
+    USE_DEMO_MATCH = True   # \u0645\u0637\u0627\u0628\u0642\u0629 \u062f\u064a\u0645\u0648\u063a\u0631\u0627\u0641\u064a\u0629 \u2014 \u0639\u0644\u0645 \u062a\u062d\u0643\u0651\u0645 (\u0637\u0631\u064a\u0642 \u0639\u0648\u062f\u0629 \u0641\u0648\u0631\u064a)
+    print('\u2705 demographic_matcher loaded')
+except ImportError:
+    USE_DEMO_MATCH = False
+    print('\u26a0\ufe0f demographic_matcher not found')
+
+try:
     from thread_generator import generate_thread_data, parse_ai_reply, format_thread_for_display
     USE_THREADS = True
     print('\u2705 thread_generator loaded')
@@ -511,6 +519,12 @@ def _plan_review(persona, pf, perfumes, used_block):
         context_hints.append("مهم جداً: أنت رجل واشتريت هذا المنتج كهدية (لزوجتك/أمك/أختك). تحدث عن إعجابها بالهدية وردة فعلها، ولا تتحدث كأنك تستخدمه شخصياً!")
     elif is_gift_female and pf.get('g') == 'رجالي':
         context_hints.append("مهم جداً: أنتِ امرأة واشتريتِ هذا المنتج كهدية (لزوجك/أخوكِ/أبوكِ). تحدثي عن فخامة الهدية وكيف عجبته، ولا تتحدثي كأنكِ تستخدمينه شخصياً!")
+
+    # توجيه واعٍ بطبيعة العطر (مناسبته/ثقله) — يجعل التقييم يطابق الاستخدام الحقيقي
+    if USE_DEMO_MATCH and not (is_gift_male or is_gift_female):
+        _dir = _demo.review_directive(persona, pf)
+        if _dir:
+            context_hints.append(_dir)
 
     if context_hints:
         cross += "\n\n## تنبيهات سياقية (التزم بها بحذافيرها):\n- " + "\n- ".join(context_hints)
@@ -1010,6 +1024,12 @@ def _pick_products(arch):
         pool = [p for p in pool if not (arch['g'] == 'male' and not is_gift_male and p.get('product_type') in ['مكياج', 'معطر_شعر'])]
     if len(pool) < 3:
         pool = PRODUCTS[:]
+
+    # فلتر المطابقة الديموغرافي: يهذّب المجمّع حسب (عمر/مناسبة/ثقل) الشخصية،
+    # يرفض غير المنطقي (شيخ+حلويات، رياضي+عود ثقيل) ويعيد الترشيح. لا يُفرِّغ
+    # المجمّع أبداً، ولا يمسّ حقن كربتك/الترند داخل blend_selection.
+    if USE_DEMO_MATCH:
+        pool = _demo.filter_pool(arch, pool)
 
     count = random.randint(*arch['count'])
 
