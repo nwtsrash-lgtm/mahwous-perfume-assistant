@@ -156,6 +156,89 @@ def length_directive(target):
 
 
 # ═══════════════════════════════════════════════════════════
+#  بنك الأمثلة الحقيقية — مفردات المنافسين لا مفردات الذكاء
+#  الكشط الشامل يرتقي من مرجعية أطوال إلى مرجعية مفردات وأنماط:
+#  نُعطي البرومبت أمثلة نصية فعلية كتبها عملاء المنافسين قرب الطول
+#  المستهدف، بدل قائمة ثابتة مكتوبة بيد المطوّر (أكبر مصدر «ريحة AI»).
+# ═══════════════════════════════════════════════════════════
+
+# احتياطي مطابق للقائمة الثابتة القديمة في MASTER_PROMPT — إن غاب الكشط
+# يتدرّج السلوك لِما كان عليه تماماً (نفس مبدأ التدرّج الآمن أعلاه).
+_FALLBACK_EXEMPLARS = [
+    'ممتاز', 'يستاهل كل ريال', 'ريحته ثابتة', 'والله حلو', 'وصل سليم',
+    'جربته وارتحت', 'عادي بصراحة', 'شكرا مهووس', 'يثبت طول اليوم',
+    'حلو بس خفيف', 'بطلب مره ثانيه', 'ريحة فخمة',
+]
+
+_EXEMPLAR_POOL = None  # كاش الوحدة — يُحمَّل مرة واحدة (الملف 292KB)
+
+
+def load_exemplar_pool(path=None):
+    """يُرجع [(عدد_كلمات, نص)] من نصوص المنافسين الحقيقية النظيفة.
+
+    يصفّي: نص غير فارغ، يحوي حروفاً عربية، ويزيل التكرار مع الحفاظ على الترتيب.
+    من competitor_reviews_full.json (الكشط الشامل) أولاً ثم القديم، وإلا [].
+    """
+    for p in ([path] if path else _SOURCE_CHAIN):
+        try:
+            with open(p, encoding='utf-8') as f:
+                data = json.load(f)
+            reviews = data.get('reviews', data) if isinstance(data, dict) else data
+            seen, pool = set(), []
+            for r in reviews:
+                txt = (r.get('text') if isinstance(r, dict) else str(r)) or ''
+                txt = txt.strip()
+                if not txt or not _ARABIC_RE.search(txt) or txt in seen:
+                    continue
+                seen.add(txt)
+                pool.append((len(txt.split()), txt))
+            if len(pool) >= 30:  # عيّنة معقولة
+                return pool
+        except Exception:
+            continue
+    return []
+
+
+def get_exemplar_pool():
+    """بركة الأمثلة مع كاش على مستوى الوحدة (تجنّب قراءة الملف كل نداء AI)."""
+    global _EXEMPLAR_POOL
+    if _EXEMPLAR_POOL is None:
+        _EXEMPLAR_POOL = load_exemplar_pool()
+    return _EXEMPLAR_POOL
+
+
+def sample_exemplars(target_len=None, n=8, pool=None):
+    """يُعيد حتى n نصاً حقيقياً منحازةً لشريحة الطول المستهدف.
+
+    عند غياب الكشط (بركة فارغة) يتدرّج إلى القائمة الثابتة القديمة —
+    فلا يتعطّل البرومبت أبداً ولا يخسر أمثلته. المنطق:
+    نبدأ بنافذة ضيقة حول الطول المعاين ثم نوسّعها حتى نجمع n.
+    """
+    pool = get_exemplar_pool() if pool is None else pool
+    if not pool:
+        picks = list(_FALLBACK_EXEMPLARS)
+        random.shuffle(picks)
+        return picks[:n]
+
+    if target_len is None:
+        chosen = random.sample(pool, min(n, len(pool)))
+        return [t for _, t in chosen]
+
+    t = int(target_len)
+    # نوافذ متوسّعة حول الطول المستهدف: قصير يجاور قصير، طويل يجاور طويل
+    picked, used = [], set()
+    for half in (1, 2, 4, 8, 999):
+        window = [txt for wc, txt in pool if abs(wc - t) <= half and txt not in used]
+        random.shuffle(window)
+        for txt in window:
+            picked.append(txt)
+            used.add(txt)
+            if len(picked) >= n:
+                return picked
+    return picked or [t for _, t in random.sample(pool, min(n, len(pool)))]
+
+
+# ═══════════════════════════════════════════════════════════
 #  محقنات النسيج البشري
 # ═══════════════════════════════════════════════════════════
 

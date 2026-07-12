@@ -74,3 +74,33 @@ def test_target_distribution_matches_real():
     share_long = sum(1 for s in samples if s >= 5) / len(samples)
     assert abs(share_1 - 0.27) < 0.05      # 27% كلمة واحدة عند المنافسين
     assert abs(share_long - 0.36) < 0.05   # 36% خمس كلمات فأكثر
+
+
+# ── بنك الأمثلة الحقيقية (الكشط الشامل كمرجعية مفردات) ──
+
+def test_exemplar_pool_loads_real_texts():
+    """بركة الأمثلة تُقرأ من الكشط الشامل: نصوص عربية نظيفة بلا تكرار."""
+    import re
+    pool = rc.load_exemplar_pool()
+    assert len(pool) >= 300                     # 351 نصًّا عربيًّا وقت الكتابة
+    texts = [t for _, t in pool]
+    assert len(texts) == len(set(texts))        # لا تكرار
+    assert all(re.search('[؀-ۿ]', t) for _, t in pool[:50])  # عربي فعلي
+
+
+def test_sample_exemplars_biased_to_length():
+    """المعاينة تنحاز لشريحة الطول المستهدف: قصير يجاور قصير، طويل يجاور طويل."""
+    random.seed(7)
+    short = rc.sample_exemplars(target_len=2, n=6)
+    long = rc.sample_exemplars(target_len=12, n=6)
+    assert short and long
+    assert max(len(t.split()) for t in short) <= 5     # قرب 2 كلمة
+    assert min(len(t.split()) for t in long) >= 8      # قرب 12 كلمة
+    assert len(set(short)) == len(short)               # فريدة داخل النداء
+
+
+def test_sample_exemplars_fallback_without_corpus():
+    """بلا كشط (بركة فارغة): يتدرّج للقائمة الثابتة القديمة — لا يفقد أمثلته."""
+    picks = rc.sample_exemplars(target_len=3, n=8, pool=[])
+    assert 1 <= len(picks) <= 8
+    assert set(picks) <= set(rc._FALLBACK_EXEMPLARS)
