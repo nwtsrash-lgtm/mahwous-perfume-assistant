@@ -14,7 +14,7 @@ Refactored Saudi Review Generator v3.0
 import sys
 import random
 import re
-from collections import deque
+from collections import deque, Counter
 
 # ضمان ترميز UTF-8 للطباعة
 try:
@@ -99,6 +99,56 @@ def dialectize_text(text, dialect_key):
 
 
 # ═══════════════════════════════════════════════════════════
+#  معاير الواقعية — يشكّل الأطوال على بيانات المنافسين الحقيقية
+#  (graceful degradation: بدائل داخلية إن غاب المعاير أو بنوكه)
+# ═══════════════════════════════════════════════════════════
+try:
+    from realism_calibrator import (
+        load_length_pool, sample_target_length, SYMBOLIC_SHORTS,
+        is_symbolic_for_1word, pick_symbolic, maybe_elongate,
+    )
+    _HAS_CALIBRATOR = True
+except ImportError:
+    _HAS_CALIBRATOR = False
+    SYMBOLIC_SHORTS = ['10/10', '👍🏻👍🏻', '💯', '…..', '😍😍😍']
+
+    def load_length_pool(path=None):
+        # احتياطي: توزيع مرصود مُصغَّر (نفس شكل المنافسين تقريبًا)
+        pool = []
+        for length, n in {1: 26, 2: 16, 3: 10, 4: 10, 5: 8, 6: 5,
+                          8: 4, 10: 3, 15: 3, 22: 2}.items():
+            pool.extend([length] * n)
+        return pool
+
+    def sample_target_length(pool):
+        return random.choice(pool)
+
+    def is_symbolic_for_1word():
+        return random.random() < 0.28
+
+    def pick_symbolic():
+        return random.choice(SYMBOLIC_SHORTS)
+
+    def maybe_elongate(text, probability=0.13):
+        return text
+
+try:
+    from short_texts_bank import (
+        OUD_OCCASIONS, FRESH_DAILY, FEMININE_SWEET, GENERAL_ADMIRATION,
+        NEGATIVE_SHORTS as _SB_NEG, NEUTRAL_SHORTS as _SB_NEU,
+    )
+except Exception:
+    OUD_OCCASIONS = FRESH_DAILY = FEMININE_SWEET = GENERAL_ADMIRATION = []
+    _SB_NEG = _SB_NEU = []
+
+try:
+    from semantic_guard import strip_broken_tail as _strip_broken_tail
+except Exception:
+    def _strip_broken_tail(words):
+        return list(words)
+
+
+# ═══════════════════════════════════════════════════════════
 #  بنوك العبارات
 # ═══════════════════════════════════════════════════════════
 
@@ -162,6 +212,43 @@ STANDALONE_SHORTS = [
     'يمشي لكل المواقف', 'فخم ومو غالي', 'حلو لكل الاوقات',
     'ريحه محد يزهقها', 'طيب وما عليه غبار',
 ]
+
+# ═══════════════════════════════════════════════════════════
+#  بنوك قصيرة مبوّبة حسب عدد الكلمات — أساس المطابقة الدقيقة
+#  (المشكلة الجذرية القديمة: random.choice على بنك مختلط الأطوال
+#   كان يُغرق شريحة الكلمة-الواحدة إلى 6% بدل 26% الحقيقية)
+# ═══════════════════════════════════════════════════════════
+
+def _build_shorts_by_len():
+    """يبوّب كل العبارات القصيرة المتاحة حسب عدد كلماتها {1..4}."""
+    buckets = {1: [], 2: [], 3: [], 4: []}
+    pools = (STANDALONE_SHORTS + OUD_OCCASIONS + FRESH_DAILY +
+             FEMININE_SWEET + GENERAL_ADMIRATION)
+    for phrase in pools:
+        n = len(phrase.split())
+        if n in buckets:
+            buckets[n].append(phrase)
+    # إزالة التكرار مع الحفاظ على الترتيب
+    for k in buckets:
+        seen = set()
+        buckets[k] = [p for p in buckets[k]
+                      if not (p in seen or seen.add(p))]
+    return buckets
+
+
+SHORTS_BY_LEN = _build_shorts_by_len()
+
+# بنوك قصيرة سلبية/محايدة مبوّبة — لاستبدال أعذار 3-نجوم الطويلة في الشرائح القصيرة
+SHORT_NEGATIVE_BY_LEN = {1: [], 2: [], 3: [], 4: []}
+SHORT_NEUTRAL_BY_LEN = {1: [], 2: [], 3: [], 4: []}
+for _p in _SB_NEG:
+    _n = len(_p.split())
+    if _n in SHORT_NEGATIVE_BY_LEN:
+        SHORT_NEGATIVE_BY_LEN[_n].append(_p)
+for _p in _SB_NEU:
+    _n = len(_p.split())
+    if _n in SHORT_NEUTRAL_BY_LEN:
+        SHORT_NEUTRAL_BY_LEN[_n].append(_p)
 
 # ── 2. فتحات المتوسطة (60+) ──
 
@@ -506,6 +593,9 @@ EMOJIS = {
     'business_woman': [],
 }
 
+# معامل خفض عام لمعدل الإيموجي — معايرة على 14.1% المرصودة عند المنافسين
+EMOJI_RATE_FACTOR = 0.55
+
 PERSONA_EMOJI_CHANCE = {
     'trendy_young_male': 0.45,
     'trendy_young_female': 0.70,
@@ -638,12 +728,17 @@ class ReviewGenerator:
     BANNED_PHRASES = BANNED_PHRASES
 
     def __init__(self, templates_path=None):
-        """تهيئة المولّد — لا يحتاج ملفات خارجية"""
+        """تهيئة المولّد — يعاير أطواله على بيانات المنافسين الحقيقية"""
         self._legacy_path = templates_path
         self._recent_hashes = deque(maxlen=1000)
         # تجميع المدن المتاحة
         self._cities = get_all_cities()
-        print("[✓] مولّد التقييمات السعودية v3.0 جاهز (14 شخصية × 3 مستويات)")
+        # بركة أطوال المنافسين — أساس مطابقة التوزيع (مع بديل مضمَّن آمن)
+        self._len_pool = load_length_pool()
+        # تكرار العبارات القصيرة — الواقع يكرّرها، فنسمح بسقف واقعي بدل منعها
+        self._short_freq = Counter()
+        print(f"[✓] مولّد التقييمات السعودية v3.1 جاهز — معاير على "
+              f"{len(self._len_pool)} تقييم منافس")
 
     # ══════════════════════════════════════════════════════════════
     #  أدوات مساعدة داخلية
@@ -718,14 +813,18 @@ class ReviewGenerator:
         return False
 
     def _maybe_add_emoji(self, text, persona_type):
-        chance = PERSONA_EMOJI_CHANCE.get(persona_type, 0)
+        chance = PERSONA_EMOJI_CHANCE.get(persona_type, 0) * EMOJI_RATE_FACTOR
         if random.random() > chance:
             return text
         emojis = EMOJIS.get(persona_type, [])
         if not emojis:
             return text
         emoji = random.choice(emojis)
-        if random.random() < 0.75:
+        r = random.random()
+        if r < 0.60:
+            # ملتصق بلا مسافة — نمط المنافس السائد («ممتاز😍»)، لا يزيد عدّ الكلمات
+            return f"{text}{emoji}"
+        elif r < 0.85:
             return f"{text} {emoji}"
         else:
             sentences = re.split(r'([.،!؟])', text, maxsplit=1)
@@ -754,9 +853,11 @@ class ReviewGenerator:
         # 2. أخطاء إملائية (30% احتمال)
         if add_typos:
             text = apply_saudi_typos(text)
-        # 3. إيموجي
+        # 3. تمطيط حرف (13.7% — يطابق «راااائع/جميييل» عند المنافسين)
+        text = maybe_elongate(text)
+        # 4. إيموجي
         text = self._maybe_add_emoji(text, persona_type)
-        # 4. تنظيف المسافات
+        # 5. تنظيف المسافات
         text = re.sub(r' {2,}', ' ', text).strip()
         return text
 
@@ -764,56 +865,115 @@ class ReviewGenerator:
     #  محركات التوليد الثلاثة
     # ══════════════════════════════════════════════════════════════
 
+    def _fit_length(self, text, target_words):
+        """يقصّ النص إلى الطول المستهدف بلا ذيل مبتور (يعيد استخدام الحارس).
+
+        لا يُطيل النص أبدًا — التقصير فقط؛ التذبذب الطفيف للأقصر طبيعي.
+        """
+        if not target_words:
+            return text
+        words = text.split()
+        if len(words) <= target_words:
+            return text
+        words = words[:target_words]
+        words = _strip_broken_tail(words)  # يحذف الأدوات المعلّقة عند القصّ
+        return ' '.join(words)
+
     def _generate_ultra_short(self, product_name, price, category, gender,
-                               persona, dialect):
-        """محرك العبارات القصيرة جداً — 1-4 كلمات"""
-        text = random.choice(STANDALONE_SHORTS)
-        return text
+                               persona, dialect, target_words=None):
+        """محرك العبارات القصيرة جداً — طول-واعٍ (1-4 كلمات) + رموز صرفة.
+
+        شريحة الكلمة-الواحدة تُصدَر أحيانًا كرمز صرف («10/10»، «…..»، «💎💎💎»)
+        بنفس نسبة المنافسين (≈28% منها) — أكبر ثغرة كانت غائبة تمامًا.
+        """
+        L = target_words or 1
+        if L < 1:
+            L = 1
+        if L > 4:
+            L = 4
+        # رمز صرف في شريحة الكلمة الواحدة (يطابق 7.2% رمزية إجمالية)
+        if L == 1 and is_symbolic_for_1word():
+            return pick_symbolic()
+        # سلاسل صفات للـ3-4 كلمات — تنوّع لا محدود («فخم وثابت وراقي»)
+        if L >= 3 and random.random() < 0.45:
+            chained = self._chain_shorts(L)
+            if chained:
+                return chained
+        bucket = SHORTS_BY_LEN.get(L, [])
+        if bucket:
+            return random.choice(bucket)
+        # احتياطي: قصّ عبارة أطول إلى الطول المطلوب (تنوّع غير محدود)
+        longer = SHORTS_BY_LEN.get(4) or STANDALONE_SHORTS
+        return self._fit_length(random.choice(longer), L)
+
+    def _chain_shorts(self, k):
+        """يبني عبارة من k كلمة بسلسلة صفات مفردة («فخم وثابت وراقي»)."""
+        ones = SHORTS_BY_LEN.get(1) or []
+        if len(ones) < k:
+            return ''
+        picks = random.sample(ones, k)
+        return ' '.join([picks[0]] + ['و' + w for w in picks[1:]])
+
+    def _grow_to(self, seed_parts, pools, target, max_parts):
+        """يبني نصًّا يبلغ الطول المستهدف على الأقل ثم يقصّه إليه بالضبط.
+
+        يحلّ مشكلة القصّ-فقط: حين تُنتج القوالب أقصر من المستهدف، نُكمّل
+        بمقاطع إضافية (بلا تكرار مقطع) بدل ترك النص أقصر فيسرّب للشرائح الأدنى.
+        """
+        parts = list(seed_parts)
+        used = set(parts)
+        guard = 0
+        while len(' '.join(parts).split()) < (target or 0) and \
+                len(parts) < max_parts and guard < 20:
+            guard += 1
+            choice = random.choice(random.choice(pools))
+            if choice in used:
+                continue
+            used.add(choice)
+            parts.append(choice)
+        return self._fit_length(' '.join(parts), target)
 
     def _generate_medium(self, product_name, price, category, gender,
-                          persona, dialect):
-        """محرك العبارات المتوسطة — 5-25 كلمة"""
-        parts = []
-
-        # 70% فرصة سياق
-        if random.random() < 0.70:
-            parts.append(random.choice(MEDIUM_CONTEXTS))
-
-        # دائماً رأي
-        parts.append(random.choice(MEDIUM_OPINIONS))
-
-        # 50% فرصة خاتمة
-        if random.random() < 0.50:
-            parts.append(random.choice(MEDIUM_CLOSERS))
-
-        text = ' '.join(parts)
-        return text
+                          persona, dialect, target_words=None):
+        """محرك العبارات المتوسطة — يبني للأعلى حتى الطول المستهدف (5-14)."""
+        seed = []
+        if random.random() < 0.60:
+            seed.append(random.choice(MEDIUM_CONTEXTS))
+        seed.append(random.choice(MEDIUM_OPINIONS))
+        return self._grow_to(seed,
+                             [MEDIUM_OPINIONS, MEDIUM_CONTEXTS, MEDIUM_CLOSERS],
+                             target_words or 6, max_parts=6)
 
     def _generate_detailed(self, product_name, price, category, gender,
-                            persona, dialect):
-        """محرك التقييمات المفصّلة — 25-80 كلمة"""
-        parts = []
+                            persona, dialect, target_words=None):
+        """محرك التقييمات المفصّلة — يبني للأعلى حتى الطول المستهدف (15+)."""
+        seed = [random.choice(DETAILED_OPENINGS), random.choice(SCENT_ANALYSIS)]
+        pools = [LONGEVITY_REPORTS, SCENT_ANALYSIS, MEDIUM_CONTEXTS,
+                 MEDIUM_OPINIONS, MEDIUM_CLOSERS]
+        return self._grow_to(seed, pools, target_words or 18, max_parts=10)
 
-        # افتتاحية تفصيلية
-        parts.append(random.choice(DETAILED_OPENINGS))
+    def _render_by_length(self, target_words, product_name, price, category,
+                           gender, persona, dialect_key):
+        """يوجّه الطول المستهدف للمحرك المناسب — أساس المطابقة الدقيقة.
 
-        # تحليل الرائحة (دائماً)
-        parts.append(random.choice(SCENT_ANALYSIS))
-
-        # تقرير ثبات (80%)
-        if random.random() < 0.80:
-            parts.append(random.choice(LONGEVITY_REPORTS))
-
-        # سياق حياتي (50%)
-        if random.random() < 0.50:
-            parts.append(random.choice(MEDIUM_CONTEXTS))
-
-        # خاتمة (70%)
-        if random.random() < 0.70:
-            parts.append(random.choice(MEDIUM_CLOSERS))
-
-        text = ' '.join(parts)
-        return text
+        1-4 → قصير جداً (شريحة طول مضبوطة) | 5-14 → متوسط | 15+ → مفصّل.
+        """
+        if target_words <= 4:
+            tier = 'ultra_short'
+            text = self._generate_ultra_short(product_name, price, category,
+                                              gender, persona, dialect_key,
+                                              target_words=target_words)
+        elif target_words <= 14:
+            tier = 'medium'
+            text = self._generate_medium(product_name, price, category, gender,
+                                         persona, dialect_key,
+                                         target_words=target_words)
+        else:
+            tier = 'detailed'
+            text = self._generate_detailed(product_name, price, category, gender,
+                                           persona, dialect_key,
+                                           target_words=target_words)
+        return tier, text
 
     # ══════════════════════════════════════════════════════════════
     #  توليد تقييم واحد
@@ -828,28 +988,20 @@ class ReviewGenerator:
         socio_class = self._pick_socio_class(persona)
         rating = self._get_rating()
 
-        # اختيار المستوى
-        roll = random.random()
-        if roll < 0.70:
-            tier = 'ultra_short'
-            text = self._generate_ultra_short(product_name, price, category,
-                                              gender, persona, dialect_key)
-        elif roll < 0.90:
-            tier = 'medium'
-            text = self._generate_medium(product_name, price, category,
-                                         gender, persona, dialect_key)
-        else:
-            tier = 'detailed'
-            text = self._generate_detailed(product_name, price, category,
-                                           gender, persona, dialect_key)
+        # الطول أولًا: عيّنة من بركة أطوال المنافسين الحقيقية ثم التوجيه
+        target_words = sample_target_length(self._len_pool)
+        tier, text = self._render_by_length(target_words, product_name, price,
+                                            category, gender, persona, dialect_key)
 
         # إضافة ملاحظات حسب التقييم
         if rating == 3:
-            excuse = random.choice(THREE_STAR_EXCUSES)
             if tier == 'ultra_short':
-                text = excuse
+                # لا نُلصق عذرًا طويلًا على تقييم قصير — نستبدله بقصير سلبي/محايد
+                short_neg = (SHORT_NEUTRAL_BY_LEN.get(target_words) or
+                             SHORT_NEGATIVE_BY_LEN.get(target_words))
+                text = random.choice(short_neg) if short_neg else text
             else:
-                text = f"{text} {excuse}"
+                text = f"{text} {random.choice(THREE_STAR_EXCUSES)}"
         elif rating == 4:
             if tier != 'ultra_short' and random.random() < 0.60:
                 note = random.choice(FOUR_STAR_NOTES)
@@ -859,23 +1011,18 @@ class ReviewGenerator:
         if tier in ('medium', 'detailed'):
             text = self._maybe_inject_seo(text, gender)
 
+        # قصّ نهائي إلى الطول المستهدف — يضمن المطابقة رغم الحقن اللاحق
+        text = self._fit_length(text, target_words)
+
         # المعالجة النهائية
         text = self._post_process(text, persona, dialect_key, add_typos=add_typos)
 
-        # فحص القائمة السوداء (أعد التوليد حتى 5 مرات)
+        # فحص القائمة السوداء (أعد التوليد حتى 5 مرات — بنفس الطول المستهدف)
         for _ in range(5):
             if not self._check_banned(text):
                 break
-            # إعادة توليد
-            if tier == 'ultra_short':
-                text = self._generate_ultra_short(product_name, price, category,
-                                                  gender, persona, dialect_key)
-            elif tier == 'medium':
-                text = self._generate_medium(product_name, price, category,
-                                             gender, persona, dialect_key)
-            else:
-                text = self._generate_detailed(product_name, price, category,
-                                               gender, persona, dialect_key)
+            tier, text = self._render_by_length(target_words, product_name, price,
+                                                category, gender, persona, dialect_key)
             text = self._post_process(text, persona, dialect_key, add_typos=add_typos)
 
         # تنظيف نهائي
@@ -941,8 +1088,17 @@ class ReviewGenerator:
                 add_typos=add_typos,
             )
 
-            # فحص التكرار
-            if not self._is_duplicate(review['text']) and len(review['text']) > 3:
+            # فحص التكرار — القصير يُسمح بتكراره بسقف واقعي (المنافس يكرّره)
+            text = review['text']
+            if not text:
+                continue
+            if len(text.split()) <= 4:
+                cap = max(4, round(count * 0.05))
+                if self._short_freq[text] < cap:
+                    self._short_freq[text] += 1
+                    reviews.append(review)
+                    used_personas.append(review['persona_type'])
+            elif not self._is_duplicate(text) and len(text) > 3:
                 reviews.append(review)
                 used_personas.append(review['persona_type'])
 
