@@ -79,6 +79,14 @@ try:
 except ImportError:
     pass
 
+# الحارس الدلالي — نزيف/بتر/تجاوز طول (كان مربوطاً في Flask فقط — سُدّت الفجوة)
+USE_SEMANTIC_GUARD = False
+try:
+    from semantic_guard import guard_violations, strip_broken_tail
+    USE_SEMANTIC_GUARD = True
+except ImportError:
+    pass
+
 USE_DEMO_MATCH = False
 try:
     import demographic_matcher as _demo   # مطابقة ديموغرافية (علم تحكّم)
@@ -454,12 +462,10 @@ def gen_reviews(persona, perfumes):
                 used_texts_block=ub,
                 extra_block=extra,
             )
-            mx = 400
-            try:
-                mx = 80 + REVIEW_PATTERNS.get(review_params.get('pattern', ''),
-                                              {}).get('words', (1, 20))[1] * 8
-            except Exception:
-                pass
+            # سقف توكنز وحدّ كلمات من الطول المعاين من بيانات المنافسين (مطابق Flask)
+            _tgt = review_params.get('len_target') or 4
+            _allow = _tgt + (1 if _tgt <= 4 else max(2, _tgt // 5))
+            mx = 80 + _tgt * 8
             rv = ai_write_unique(prompt, max_tokens=mx)
             txt = (rv.get('text') if isinstance(rv, dict) else '') or ''
             # أخطاء إملائية طبيعية ثم تنظيف بشري
@@ -473,6 +479,20 @@ def gen_reviews(persona, perfumes):
                 # قانون 4: لا نص وهمي — نتوقف ونُظهر خطأ بدل الفبركة.
                 st.error('تعذّر الاتصال بالذكاء الاصطناعي أو نفد الرصيد — لم تتم كتابة أي تقييم.')
                 st.stop()
+            # ══ الحارس الدلالي: نزيف/بتر/تجاوز → إعادة توليد ثم قص وإنقاذ الذيل ══
+            if USE_SEMANTIC_GUARD:
+                _viol = guard_violations(txt, max_words=_allow)
+                if _viol:
+                    _hint = (f'\n\n⚠️ رُفض النص السابق «{txt}» ({"، ".join(_viol)}). '
+                             f'اكتب تقييماً جديداً عن العطر نفسه فقط، جملة مكتملة المعنى، {_tgt} كلمات كحد أقصى.')
+                    _rv2 = ai_write_unique(prompt + _hint, max_tokens=mx, attempts=2)
+                    _t2 = (_rv2.get('text') if isinstance(_rv2, dict) else '') or ''
+                    if _t2.strip():
+                        txt = _humanize(_t2)
+                _w = txt.split()
+                if len(_w) > _allow:
+                    _w = _w[:_allow]
+                txt = ' '.join(strip_broken_tail(_w))
             entry = rv if isinstance(rv, dict) else {}
             entry.update({
                 'product': pf['name'], 'brand': pf['brand'], 'price': pf['price'],
@@ -485,50 +505,10 @@ def gen_reviews(persona, perfumes):
         archive_batch(all_reviews, pname or '')
         return all_reviews
     else:
-        # === برومبت قديم (batch) ===
-        pf_list = '\n'.join([f'{i+1}. {p["name"]} ({p["brand"]}, {p["price"]} ر.س)'
-                             for i, p in enumerate(perfumes)])
-        prompt = f"""أنت عميل سعودي حقيقي يكتب تقييمات على متجر عطور إلكتروني.
-
-بيانات الشخصية:
-- {persona['label']}، {'رجل' if persona['gender']=='male' else 'امرأة'}، {persona['age']} سنة، من {persona['city']}
-
-العطور:
-{pf_list}
-
-## قواعد كتابة التقييم:
-1. الطول: من 3 كلمات إلى 25 كلمة فقط
-2. لا تذكر اسم العطر في كل تقييم
-3. لا تضع إيموجي إلا نادراً
-4. لا تبدأ كل تقييم بنفس الطريقة
-5. لهجة سعودية عامية حسب المدينة
-6. نوّع بين: تقييم قصير، توصيل، تغليف، ثبات، ريحة، هدية
-7. التقييم 5 نجوم غالباً، أحياناً 4، نادراً 3
-
-⛔ لا تكرر أي صياغة مشابهة لهذه:
-{ub if ub else '(لا يوجد سابق)'}
-
-أرجع JSON فقط بدون أي نص:
-[{{"product":"اسم العطر","rating":5,"text":"التقييم"}}]"""
-
-        result = ai_call(prompt, 2000)
-        if not result:
-            # قانون 4: لا نص وهمي — نتوقف ونُظهر خطأ بدل الفبركة.
-            st.error('تعذّر الاتصال بالذكاء الاصطناعي أو نفد الرصيد — لم تتم كتابة أي تقييم.')
-            st.stop()
-        try:
-            reviews = json.loads(clean_json(result))[:len(perfumes)]
-            for i, rv in enumerate(reviews):
-                if i < len(perfumes):
-                    rv['product'] = perfumes[i]['name']
-                    rv['brand'] = perfumes[i]['brand']
-                    rv['price'] = perfumes[i]['price']
-            archive_batch(reviews, persona.get('name', ''))
-            return reviews
-        except Exception:
-            # قانون 4: لا نص وهمي — نتوقف ونُظهر خطأ بدل الفبركة.
-            st.error('تعذّر الاتصال بالذكاء الاصطناعي أو نفد الرصيد — لم تتم كتابة أي تقييم.')
-            st.stop()
+        # المسار الدفعي القديم أُغلق (توحيد المنظومة): بلا personas_engine
+        # لا توليد — نفس فلسفة قانون 4، لا مخرج متدنٍّ يعمل بصمت.
+        st.error('محرك الشخصيات personas_engine غير محمّل — لا يمكن توليد تقييمات بدونه.')
+        st.stop()
 
 
 # جوانب متجر متنوّعة — يُختار جانبان لكل تقييم لمنع التكرار (مطابق app.py)
