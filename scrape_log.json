@@ -1,0 +1,186 @@
+{
+  "completed_at": "2026-07-12T12:45:07.468320",
+  "summary": {
+    "total_stores": 25,
+    "total_reviews": 1215,
+    "with_text": 452,
+    "new_added": 463
+  },
+  "per_store": [
+    {
+      "store_id": "91363561",
+      "store_name": "Halah Beauty",
+      "scraped": 9,
+      "new_added": 9,
+      "pages": 3
+    },
+    {
+      "store_id": "553600259",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    },
+    {
+      "store_id": "650837859",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    },
+    {
+      "store_id": "1375458544",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    },
+    {
+      "store_id": "2088520282",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    },
+    {
+      "store_id": "911239496",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    },
+    {
+      "store_id": "21846792",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    },
+    {
+      "store_id": "2021340281",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    },
+    {
+      "store_id": "555275606",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    },
+    {
+      "store_id": "1612775524",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    },
+    {
+      "store_id": "1566267704",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    },
+    {
+      "store_id": "1891860617",
+      "store_name": "شركه عالم جيفينشي التجارية",
+      "scraped": 475,
+      "new_added": 448,
+      "pages": 50
+    },
+    {
+      "store_id": "620747497",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    },
+    {
+      "store_id": "216339537",
+      "store_name": "سعيد صلاح للعطور والتجميل",
+      "scraped": 33,
+      "new_added": 6,
+      "pages": 6
+    },
+    {
+      "store_id": "295498147",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    },
+    {
+      "store_id": "305127441",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    },
+    {
+      "store_id": "1696817336",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    },
+    {
+      "store_id": "1301218167",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    },
+    {
+      "store_id": "1355012420",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    },
+    {
+      "store_id": "534522753",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    },
+    {
+      "store_id": "704523804",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    },
+    {
+      "store_id": "286429764",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    },
+    {
+      "store_id": "1892036484",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    },
+    {
+      "store_id": "773029340",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    },
+    {
+      "store_id": "125548687",
+      "store_name": "المتجر غير موجود",
+      "scraped": 0,
+      "new_added": 0,
+      "pages": 2
+    }
+  ]
+}
