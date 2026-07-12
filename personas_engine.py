@@ -27,6 +27,7 @@ try:
         load_length_pool as _rc_load_pool,
         sample_target_length as _rc_sample,
         length_directive as _rc_directive,
+        sample_exemplars as _rc_exemplars,
         LIVE_MAX_TARGET as _RC_CAP,
     )
     _LEN_POOL = _rc_load_pool()
@@ -34,6 +35,8 @@ try:
 except Exception:
     _REALISM = False
     _LEN_POOL = []
+    def _rc_exemplars(target_len=None, n=8, pool=None):  # طريق عودة: بلا معاير
+        return []
 
 # ═══════════════════════════════════════════════════════════
 #  تحميل الأسماء
@@ -1285,13 +1288,8 @@ def generate_review_params(persona):
 #  4. الـ AI يتلقى "مهمة" لا مجرد وصف نمط
 # ═══════════════════════════════════════════════════════════
 
-MASTER_PROMPT = """اكتب تقييم عطر بلهجة سعودية عامية. {length_rule}.
-
-المنتج: {product_name}
-التقييم: {rating} نجوم
-
-## أمثلة ({examples_note}):
-- ممتاز
+# قائمة ثابتة احتياطية — تُستخدم فقط إن تعذّرت معاينة نصوص المنافسين الحقيقية
+_FALLBACK_EXAMPLE_LINES = """- ممتاز
 - يستاهل كل ريال
 - ريحته ثابتة
 - والله حلو
@@ -1302,7 +1300,15 @@ MASTER_PROMPT = """اكتب تقييم عطر بلهجة سعودية عامية
 - يثبت طول اليوم
 - حلو بس خفيف
 - بطلب مره ثانيه
-- ريحة فخمة
+- ريحة فخمة"""
+
+MASTER_PROMPT = """اكتب تقييم عطر بلهجة سعودية عامية. {length_rule}.
+
+المنتج: {product_name}
+التقييم: {rating} نجوم
+
+## أمثلة ({examples_note}):
+{examples_block}
 
 ## القواعد:
 - {length_rule}
@@ -1397,11 +1403,18 @@ def build_master_prompt(persona, product_name, review_params, used_texts_block='
 
     typo_rule = 'أضف خطأ إملائي طبيعي واحد' if persona.get('has_typo') else 'بدون أخطاء إملائية'
 
+    # أمثلة أسلوبية من نصوص المنافسين الحقيقية قرب الطول المستهدف — مرجعية
+    # المفردات الفعلية لا مفردات الذكاء. تدرّج آمن للقائمة الثابتة عند غياب الكشط.
+    _exemplars = _rc_exemplars(target_len=len_target, n=8)
+    examples_block = ('\n'.join(f'- {t}' for t in _exemplars)
+                      if _exemplars else _FALLBACK_EXAMPLE_LINES)
+
     prompt = MASTER_PROMPT.format(
         product_name=product_name,
         rating=review_params['rating'],
         length_rule=length_rule,
         examples_note=examples_note,
+        examples_block=examples_block,
         typo_rule=typo_rule,
         used_texts_block=used_texts_block if used_texts_block else '(لا يوجد سابق)',
     )

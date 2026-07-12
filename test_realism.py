@@ -104,3 +104,16 @@ def test_sample_exemplars_fallback_without_corpus():
     picks = rc.sample_exemplars(target_len=3, n=8, pool=[])
     assert 1 <= len(picks) <= 8
     assert set(picks) <= set(rc._FALLBACK_EXEMPLARS)
+
+
+def test_master_prompt_injects_real_exemplars():
+    """البرومبت المشترك يحقن أمثلة من نصوص المنافسين الحقيقية (لا القائمة الثابتة)."""
+    pool_texts = {t for _, t in rc.load_exemplar_pool()}
+    p = generate_persona()
+    params = generate_review_params(p)
+    params['len_target'] = 12
+    random.seed(5)
+    prompt, _ = build_master_prompt(p, 'عطر تجريبي', params)
+    example_lines = {l[2:] for l in prompt.splitlines() if l.startswith('- ')}
+    # على الأقل بعض أسطر الأمثلة نصوص فعلية من الكشط الشامل
+    assert len(example_lines & pool_texts) >= 3
