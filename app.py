@@ -160,16 +160,9 @@ try:
 except ImportError:
     USE_AR_TRACK = False
 
-# \u0645\u062d\u0631\u0643 \u0627\u0644\u0642\u0648\u0627\u0644\u0628 \u0627\u0644\u0636\u062e\u0645 \u2014 \u0634\u0628\u0643\u0629 \u0627\u0644\u0623\u0645\u0627\u0646 \u0627\u0644\u062d\u0642\u064a\u0642\u064a\u0629 \u0639\u0646\u062f \u062a\u0639\u0637\u0651\u0644 \u0627\u0644\u0640 AI
-try:
-    from review_generator import ReviewGenerator
-    fallback_gen = ReviewGenerator()
-    USE_REVIEW_GEN = True
-    print('\u2705 review_generator loaded (fallback engine)')
-except Exception as _e:
-    fallback_gen = None
-    USE_REVIEW_GEN = False
-    print(f'\u26a0\ufe0f review_generator not available: {_e}')
+# \u0642\u0627\u0646\u0648\u0646 4: \u0644\u0627 \u0642\u0648\u0627\u0644\u0628 \u0627\u062d\u062a\u064a\u0627\u0637\u064a\u0629 \u0641\u064a \u0627\u0644\u0645\u0633\u0627\u0631 \u0627\u0644\u062d\u064a \u2014 \u0627\u0644\u0640 AI \u064a\u0643\u062a\u0628 \u0623\u0648 \u0646\u062a\u0648\u0642\u0641 \u0628\u062e\u0637\u0623 \u0648\u0627\u0636\u062d.
+# (\u0623\u064f\u0632\u064a\u0644 fallback_gen \u0627\u0644\u0645\u064a\u062a: \u0643\u0627\u0646 \u064a\u064f\u0646\u0634\u0623 \u0648\u0644\u0627 \u064a\u064f\u0633\u062a\u062f\u0639\u0649 \u2014 \u0627\u0644\u0645\u0648\u0644\u0651\u062f \u0627\u0644\u0642\u0627\u0644\u0628\u064a \u0623\u062f\u0627\u0629
+#  offline \u0641\u064a generate_audience.py \u062d\u0635\u0631\u0627\u064b.)
 
 try:
     from mahalli_intel import (get_our_products as intel_get_our_products,
@@ -373,18 +366,9 @@ def _make_master_prompt(persona, product_name, used_block, extra_block=''):
         if isinstance(result, tuple):
             return result
         return result, params
-    # حالة قصوى: personas_engine غير محمّل إطلاقاً — نسرد قصة بدل الوصف الجاف
-    rating = 5 if random.random() < 0.6 else (4 if random.random() < 0.7 else 3)
-    prompt = (
-        f"اكتب تقييم عطر من 1 إلى 4 كلمات فقط بلهجة سعودية عامية.\n"
-        f"المنتج: {product_name}\n"
-        f"التقييم: {rating} نجوم\n"
-        f"أمثلة: ممتاز / والله حلو / ريحته ثابتة / يستاهل كل ريال\n"
-        f"لا تذكر اسم المنتج. بدون ترقيم.\n"
-        f"{('لا تكرر: ' + used_block) if used_block else ''}\n"
-        f'أرجع JSON فقط: {{"rating": {rating}, "text": "...", "is_verified_purchase": true}}'
-    )
-    return prompt, {'rating': rating, 'pattern': 'ultra_short'}
+    # personas_engine غير محمّل = المنظومة ناقصة — نتوقف بخطأ واضح (503)
+    # بدل مسار برومبت قديم متدنٍّ يعمل بصمت (نفس فلسفة قانون 4).
+    raise AIUnavailable('محرك الشخصيات personas_engine غير محمّل — لا توليد بدونه')
 
 
 # ═══════════════════════════════════════════════════════════
@@ -538,21 +522,21 @@ def _write_review(persona, pf, prompt, params):
     يرفع AIUnavailable إذا تعذّر الـ AI (انقطاع/نفاد رصيد) فيتوقف التوليد.
     يسجّل النص في طبقة الجلسة لمنع أي تكرار لاحق.
     """
-    # سقف توكنز مرتبط بطول النمط — يمنع الإطناب فيزيائياً (يكفي JSON + النص)
-    mx = 20
-    if USE_PATTERNS:
-        mx = REVIEW_PATTERNS.get(params.get('pattern', ''), {}).get('words', (1, 20))[1]
+    # سقف توكنز وحدّ كلمات من الطول المعاين من بيانات المنافسين الحقيقية
+    # (len_target من generate_review_params) — عند غيابه: السلوك القديم (4)
+    mx = params.get('len_target') or 4
+    _allow = mx + (1 if mx <= 4 else max(2, mx // 5))  # سماحية تجاوز صغيرة
     max_tokens = 80 + mx * 8
     rv = _ai_write_json(prompt, max_tokens=max_tokens, attempts=5)  # يرفع AIUnavailable عند الفشل
     # ══ الحارس الدلالي: نزيف/بتر/تجاوز طول → إعادة توليد بدل القصّ الصامت ══
     if USE_SEMANTIC_GUARD:
         for _k in range(2):
             _t = _humanize(rv.get('text', ''))
-            _viol = guard_violations(_t, max_words=4)
+            _viol = guard_violations(_t, max_words=_allow)
             if not _viol:
                 break
             _hint = (f'\n\n⚠️ رُفض النص السابق «{_t}» ({"، ".join(_viol)}). '
-                     'اكتب تقييماً جديداً عن العطر نفسه فقط، جملة مكتملة المعنى، ٤ كلمات كحد أقصى.')
+                     f'اكتب تقييماً جديداً عن العطر نفسه فقط، جملة مكتملة المعنى، {mx} كلمات كحد أقصى.')
             _nxt = _ai_unique_json(prompt + _hint, max_tokens=max_tokens, attempts=2)
             if _nxt and _nxt.get('text'):
                 rv['text'] = _nxt['text']
@@ -568,10 +552,10 @@ def _write_review(persona, pf, prompt, params):
         rv['text'] = apply_typos(rv['text'], probability=1.0)
     # تنظيف نهائي: نص بشري متدفّق بلا ترقيم أو رموز (ضمان مطلق)
     rv['text'] = _humanize(rv.get('text', ''))
-    # ══ قص أخير: 4 كلمات بحد أقصى + إنقاذ الذيل المبتور (لا شظايا) ══
+    # ══ قص أخير عند الحد المعاين + إنقاذ الذيل المبتور (لا شظايا) ══
     _words = rv['text'].split()
-    if len(_words) > 4:
-        _words = _words[:4]
+    if len(_words) > _allow:
+        _words = _words[:_allow]
     if USE_SEMANTIC_GUARD:
         _words = strip_broken_tail(_words)
     rv['text'] = ' '.join(_words)
