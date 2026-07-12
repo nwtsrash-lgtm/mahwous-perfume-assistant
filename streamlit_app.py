@@ -79,6 +79,13 @@ try:
 except ImportError:
     pass
 
+USE_DEMO_MATCH = False
+try:
+    import demographic_matcher as _demo   # مطابقة ديموغرافية (علم تحكّم)
+    USE_DEMO_MATCH = True
+except ImportError:
+    pass
+
 try:
     from mahalli_intel import (
         get_our_products, get_competitors, get_our_rank, get_priorities,
@@ -341,6 +348,8 @@ def _fallback_gen_persona():
         pool = [p for p in PRODUCTS if p['g'] in arch['prefers']]
     if len(pool) < 3:
         pool = PRODUCTS[:]
+    if USE_DEMO_MATCH:
+        pool = _demo.filter_pool(arch, pool)   # مطابقة ديموغرافية قبل الخلطة
     count = random.randint(*arch['count'])
     # خلطة "محلي" الذكية: كربتك (أولوية) + أفضل 100 ترند + تمويه
     if USE_TRENDING:
@@ -388,6 +397,8 @@ def gen_persona_full():
             pool = [p for p in PRODUCTS if p['g'] in arch_match['prefers']]
         if len(pool) < 3:
             pool = PRODUCTS[:]
+        if USE_DEMO_MATCH:
+            pool = _demo.filter_pool(arch_match, pool)   # مطابقة ديموغرافية قبل الخلطة
         count = random.randint(*arch_match['count'])
         # خلطة "محلي" الذكية: كربتك (أولوية) + أفضل 100 ترند + تمويه — مختلفة كل مرة
         if USE_TRENDING:

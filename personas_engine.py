@@ -13,6 +13,13 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
 
+# محرك المطابقة الديموغرافي (اختياري — للتوجيه الواعي بطبيعة العطر في build_context_hints)
+try:
+    import demographic_matcher as _demo
+    _DEMO_MATCH = True
+except ImportError:
+    _DEMO_MATCH = False
+
 # ═══════════════════════════════════════════════════════════
 #  تحميل الأسماء
 # ═══════════════════════════════════════════════════════════
@@ -1338,6 +1345,12 @@ def build_context_hints(persona, product):
         hints.append("مهم جداً: أنت رجل واشتريت هذا المنتج كهدية (لزوجتك/أمك/أختك). تحدث عن إعجابها بالهدية وردة فعلها، ولا تتحدث كأنك تستخدمه شخصياً!")
     elif is_gift_female and product.get('g') == 'رجالي':
         hints.append("مهم جداً: أنتِ امرأة واشتريتِ هذا المنتج كهدية (لزوجك/أخوكِ/أبوكِ). تحدثي عن فخامة الهدية وكيف عجبته، ولا تتحدثي كأنكِ تستخدمينه شخصياً!")
+
+    # توجيه واعٍ بطبيعة العطر (مناسبته/ثقله) — مطابق لمنطق app.py._plan_review
+    if _DEMO_MATCH and not (is_gift_male or is_gift_female):
+        _dir = _demo.review_directive(persona, product)
+        if _dir:
+            hints.append(_dir)
 
     if not hints:
         return ''
