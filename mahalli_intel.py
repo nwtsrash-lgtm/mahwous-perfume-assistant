@@ -219,6 +219,18 @@ def get_our_rank(search_query, use_cache=True):
 # Priority Engine
 # ═══════════════════════════════════════════
 
+def _num(value, default=0.0):
+    """تحويل آمن إلى رقم — Algolia والكاش يخزنان قيم all_rating نصوصاً ('0'، '4.7')."""
+    if isinstance(value, bool):
+        return float(default)
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
 def _extract_price(product):
     """استخراج السعر الرقمي من بنية Algolia المتداخلة {'SA': {'SAR': 165.0}} أو رقم مباشر."""
     price = product.get('price', 0)
@@ -239,15 +251,15 @@ def _extract_price(product):
 def calculate_priority(product, competitors):
     """حساب أولوية المنتج بناءً على الفجوة مع المتصدر"""
     our_rating = product.get('all_rating', {}) or {}
-    our_weight = our_rating.get('weight', 0)
-    our_count = our_rating.get('count', 0)
-    our_avg = our_rating.get('average', 0)
-    
+    our_weight = _num(our_rating.get('weight', 0))
+    our_count = int(_num(our_rating.get('count', 0)))
+    our_avg = _num(our_rating.get('average', 0))
+
     top_weight = 0
     top_competitor = None
     for c in competitors:
         c_rating = c.get('all_rating', {}) or {}
-        c_weight = c_rating.get('weight', 0)
+        c_weight = _num(c_rating.get('weight', 0))
         if c_weight > top_weight:
             top_weight = c_weight
             top_competitor = c
@@ -284,7 +296,7 @@ def get_priorities(limit=20):
 
     # رتّب حسب عدد تقييماتنا تنازلياً (الأهم أولاً) ثم خذ شريحة محدودة
     def _our_count(p):
-        return (p.get('all_rating') or {}).get('count', 0)
+        return _num((p.get('all_rating') or {}).get('count', 0))
     products.sort(key=_our_count, reverse=True)
     products = products[:MAX_PRIORITY_SCAN]
 
@@ -312,7 +324,7 @@ def get_priorities(limit=20):
 def daily_quota(product, target_weight, days=60, avg_rating=4.7):
     """حساب عدد التقييمات المطلوبة يومياً"""
     current_rating = product.get('all_rating', {}) or {}
-    current_weight = current_rating.get('weight', 0)
+    current_weight = _num(current_rating.get('weight', 0))
     needed = target_weight - current_weight
     if needed <= 0:
         return 0
@@ -428,7 +440,7 @@ def get_dashboard_summary():
     products = get_our_products()
     plan = generate_daily_plan()
     
-    active_products = len([p for p in products if (p.get('all_rating', {}) or {}).get('count', 0) > 0])
+    active_products = len([p for p in products if _num((p.get('all_rating', {}) or {}).get('count', 0)) > 0])
     
     return {
         'total_products': len(products),
