@@ -585,214 +585,21 @@ def _ai_single_review(persona, product):
     _archive_review(rv.get('text', ''), product['name'], persona.get('name', ''))
     return rv
 
-# جوانب متجر متنوّعة — يُختار منها جانبان عشوائياً لكل تقييم لمنع التكرار
-STORE_ASPECTS = [
-    'سرعة التوصيل — وصل قبل الموعد', 'فخامة التغليف — فقاعات وكرتون مزدوج', 
-    'أصالة العطور 100%', 'خدمة العملاء — ردوا علي بسرعة',
-    'الأسعار — أرخص من المحلات', 'سهولة الطلب والدفع', 
-    'العينات المجانية — جاني عينات مع الطلب', 'الكرت الشخصي مع الطلب', 
-    'التغليف المحمي ضد الكسر', 'التقسيط — تابي وتمارا بدون فوائد',
-    'تتبع الطلب — كل خطوة واضحة'
-]
-# أساليب بداية متنوّعة لتقييم المتجر (تمنع تكرار صيغة الافتتاح)
-STORE_OPENERS = [
-    'ابدأ بانطباعك المباشر عن تجربة الشراء',
-    'ابدأ بذكر آخر طلب وصلك وكيف كان',
-    'ابدأ بمقارنة بسيطة مع متاجر ثانية تعاملت معها',
-    'ابدأ بردة فعلك أول ما فتحت الطلب',
-    'ابدأ بنصيحة لغيرك يطلب من المتجر',
-]
-
-
-# نداءات عامّية مقصورة — تُحذف حتميًّا بعد «يا» فقط (لا نمط عام)،
-# فتبقى «يا سلام/يا رب/يا ليت/يا هلا» سليمة لأنها أصيلة وليست نداءً لشخص.
-_STORE_VOCATIVES = ['صاحبي', 'خوي', 'ربع', 'شيخ', 'جماعة', 'حلفي',
-                    'رجال', 'حبيبتي', 'ناس', 'صاح', 'ولد']
-_STORE_VOCATIVE_RE = re.compile(
-    r'يا\s+(?:' + '|'.join(_STORE_VOCATIVES) + r')(?![ء-ي])')
-
-
-def _strip_store_vocatives(text, persona_name):
-    """حذف حتمي لنداء الاسم من مخرج المتجر: «يا <اسم معروف>» و«يا أبو/أم <كلمة>»
-    و«يا <نداء عامّي من قائمة مقصورة>». محصور في names.json + اسم الشخصية + القائمة
-    حتى لا يمسّ «يا سلام/يا رب/يا ليت/يا هلا»."""
-    names = set(NAMES.get('male', []) + NAMES.get('female', []) + NAMES.get('family_names', []))
-    parts = (persona_name or '').split()
-    if parts:
-        names.add(parts[0])
-    for nm in names:
-        text = re.sub(r'يا\s+' + re.escape(nm) + r'(?![ء-ي])', ' ', text)
-    text = re.sub(r'يا\s+(?:أبو|أم)\s+\S+', ' ', text)
-    text = _STORE_VOCATIVE_RE.sub(' ', text)  # نداءات عامّية مقصورة (يا صاحبي/يا ربع/يا رجال...)
-    return re.sub(r'\s+', ' ', text).strip()
-
-
 # ═══════════════════════════════════════════════════════════
-# تنوّع تقييم المتجر: طول مُعايَن + سقف موضوعي عبر الجلسة
+# تقييم المتجر — يستورد المنطق المرجعي من الوحدة المشتركة store_review
+# (نفس البيانات والبرومبت والحُرّاس التي تستوردها واجهة Streamlit — مصدر واحد)
 # ═══════════════════════════════════════════════════════════
+from store_review import (
+    STORE_ASPECTS, STORE_OPENERS, ASPECT_TOPIC,
+    sample_length_target, band_for, build_store_prompt,
+    strip_store_vocatives, has_luxury_metaphor, scrub_luxury_metaphor,
+    StoreTopicTracker,
+)
 
-# ── هدف طول مُعايَن لكل تقييم (يطابق توزيع العملاء الحقيقي) ──
-# 35% قصير جدًا · 40% قصير · 25% متوسط — يُعيَّن عشوائيًّا قبل البرومبت ويُحقن نصًّا،
-# فيكسر رتابة «القصة من 8-16 كلمة» التي كانت تُنتج تقييمات متشابهة الطول.
-_LENGTH_BANDS = [
-    (0.35, (2, 5),   'قصير جدًا — من كلمتين إلى خمس كلمات فقط، انطباع خاطف بلا قصة'),
-    (0.40, (6, 10),  'قصير — من ست إلى عشر كلمات، جملة أو جملتين'),
-    (0.25, (11, 18), 'متوسط — من إحدى عشرة إلى ثماني عشرة كلمة، قصة مصغّرة'),
-]
-
-
-def _sample_length_target():
-    """يعيّن نطاق طول عشوائيًّا وفق التوزيع الحقيقي — يرجع (min, max, وصف نصّي)."""
-    r = random.random()
-    cum = 0.0
-    for prob, (lo, hi), desc in _LENGTH_BANDS:
-        cum += prob
-        if r <= cum:
-            return lo, hi, desc
-    _, (lo, hi), desc = _LENGTH_BANDS[-1]
-    return lo, hi, desc
-
-
-# ── سقف موضوعي عبر الجلسة: لا موضوع يتجاوز 20% من تقييمات المتجر ──
-# يقتل «هوس التغليف» حتى لو نجا من إزالة المثال الذهبي: كل تقييم يُصنَّف بموضوعه
-# الغالب، والمواضيع المشبعة تُستبعد من اختيار الجوانب وتُرفض إن كتبها النموذج تلقائيًّا.
-STORE_TOPICS = ('تغليف', 'سعر', 'سرعة', 'خدمة', 'عينات', 'تقسيط', 'أصالة')
-
-# كل جانب متجر → موضوعه (لتوجيه اختيار الجوانب بعيدًا عن المشبع)
-_ASPECT_TOPIC = {
-    'سرعة التوصيل — وصل قبل الموعد': 'سرعة',
-    'فخامة التغليف — فقاعات وكرتون مزدوج': 'تغليف',
-    'أصالة العطور 100%': 'أصالة',
-    'خدمة العملاء — ردوا علي بسرعة': 'خدمة',
-    'الأسعار — أرخص من المحلات': 'سعر',
-    'سهولة الطلب والدفع': 'خدمة',
-    'العينات المجانية — جاني عينات مع الطلب': 'عينات',
-    'الكرت الشخصي مع الطلب': 'عينات',
-    'التغليف المحمي ضد الكسر': 'تغليف',
-    'التقسيط — تابي وتمارا بدون فوائد': 'تقسيط',
-    'تتبع الطلب — كل خطوة واضحة': 'سرعة',
-}
-
-# كلمات دالّة على كل موضوع — لتصنيف النص المولّد فعليًّا (لا الجوانب المطلوبة فقط)
-_TOPIC_KEYWORDS = {
-    'تغليف': ['تغليف', 'مغلف', 'مغلّف', 'غلاف', 'كرتون', 'علبة', 'فقاعات', 'يغلف', 'تغليفة'],
-    'سعر':   ['سعر', 'أسعار', 'اسعار', 'رخيص', 'أرخص', 'ارخص', 'خصم', 'وفرت', 'وفر', 'توفير', 'ريال', 'الأرخص'],
-    'سرعة':  ['توصيل', 'وصل', 'سريع', 'بسرعة', 'يوصل', 'شحن', 'تتبع', 'يومين', 'الموعد', 'وصلني', 'وصلت'],
-    'خدمة':  ['خدمة', 'ردوا', 'ردو', 'تواصل', 'واتساب', 'اهتمام', 'يهتمون', 'نصحوني', 'استفسار', 'ردهم'],
-    'عينات': ['عينة', 'عينات', 'كرت', 'بطاقة', 'هدية'],
-    'تقسيط': ['تقسيط', 'تابي', 'تمارا', 'أقساط', 'اقساط', 'قسط'],
-    'أصالة': ['أصلي', 'أصلية', 'اصلي', 'اصلية', 'أصالة', 'باركود', 'سيريال', 'موثوق', 'مضمون'],
-}
-
-# ── حظر استعارات الفخامة (كنز/صندوق/مجوهرات/ذهب...) ──
-# «هوس التغليف» كان يجرّ النموذج لتشبيه الطلب بصندوق كنوز أو مجوهرات أو ذهب.
-# هذه الكلمات لا ترد أصلاً في تقييم متجر عطور واقعي، فحظرها آمن ويضمن «صفر استعارة كنز».
-_LUXURY_NOUNS = ['كنوز', 'كنز', 'صناديق', 'صندوق', 'مجوهرات', 'جوهرة', 'جواهر',
-                 'ألماس', 'الماس', 'لؤلؤ', 'ذهب', 'ذهبية']
-# أدوات التشبيه التي تسبق الاستعارة عادةً — تُحذف معها لتبقى الجملة سليمة
-_SIMILE_PARTICLES = {'كأنه', 'كأني', 'كأنها', 'كأنك', 'كأن', 'كنه', 'كنها', 'مثل', 'زي',
-                     'تحفة', 'فاتح', 'فاتحة', 'فتحت', 'شاري', 'شارية', 'حماية', 'كنز', 'صندوق'}
-# سابقة اختيارية (ال/بال/كال/لل/ب/ك/ل/و/ف) + الكلمة + حدّ عربي على الطرفين
-_LUXURY_RE = re.compile(
-    r'(?<![ء-ي])(?:وال|بال|كال|فال|ال|لل|ب|ك|ل|و|ف)?(?:' + '|'.join(_LUXURY_NOUNS) + r')(?![ء-ي])')
-
-
-def _has_luxury_metaphor(text):
-    """هل النص فيه كلمة استعارة فخامة محظورة؟"""
-    return bool(_LUXURY_RE.search(text))
-
-
-def _scrub_luxury_metaphor(text):
-    """ضمان حتمي: يزيل كل كلمة استعارة فخامة + أداة التشبيه التي تسبقها.
-    شبكة أمان أخيرة إن نجت الاستعارة من إعادة التوليد — تضمن صفر «كنز/صندوق/مجوهرات»."""
-    if not _LUXURY_RE.search(text):
-        return text
-    keep = []
-    for w in text.split():
-        if _LUXURY_RE.search(w):
-            while keep and keep[-1] in _SIMILE_PARTICLES:
-                keep.pop()
-            continue
-        keep.append(w)
-    return re.sub(r'\s+', ' ', ' '.join(keep)).strip()
-
-
-_STORE_TOPIC_COUNTS = {t: 0 for t in STORE_TOPICS}
-_STORE_TOPIC_TOTAL = 0
-_TOPIC_CAP = 0.20   # لا موضوع يتجاوز 20% من تقييمات المتجر في الجلسة
-_TOPIC_FLOOR = 5    # لا تُفعَّل النسبة قبل تجميع 5 تقييمات (تفادي تقييد مبكر)
-
-
-def _classify_store_topic(text):
-    """الموضوع الغالب لنص تقييم المتجر (أكثر المواضيع تطابقًا للكلمات الدالّة).
-    عند تعادل التطابق (نص يلمّح لموضوعين، مثل «طلبية وصلتني جاني عينات») يُرجَّح
-    الموضوع الأقل استخدامًا في الجلسة — يوازن التوزيع ويخدم سقف 20%.
-    يرجع None لو لم يُطابق أي موضوع — فالتقييمات العامّة لا تُحسب ضد أي سقف."""
-    scored = []
-    for topic in STORE_TOPICS:
-        hits = sum(text.count(kw) for kw in _TOPIC_KEYWORDS[topic])
-        if hits:
-            # (أكثر تطابقًا أولًا، ثم الأقل استخدامًا، ثم ترتيب ثابت)
-            scored.append((-hits, _STORE_TOPIC_COUNTS.get(topic, 0), STORE_TOPICS.index(topic), topic))
-    if not scored:
-        return None
-    scored.sort()
-    return scored[0][3]
-
-
-def _store_blocked_topics():
-    """المواضيع المشبعة (بلغ نصيبها ≥20%) — تُستبعد حتى ينخفض نصيبها بنمو المقام."""
-    if _STORE_TOPIC_TOTAL < _TOPIC_FLOOR:
-        return set()
-    return {t for t in STORE_TOPICS
-            if _STORE_TOPIC_COUNTS[t] / _STORE_TOPIC_TOTAL >= _TOPIC_CAP}
-
-
-def _record_store_topic(text):
-    """يسجّل موضوع تقييم المتجر النهائي في عدّاد الجلسة — يرجع الموضوع المصنَّف."""
-    global _STORE_TOPIC_TOTAL
-    topic = _classify_store_topic(text)
-    _STORE_TOPIC_TOTAL += 1
-    if topic:
-        _STORE_TOPIC_COUNTS[topic] += 1
-    return topic
-
-
-def _reset_store_topics():
-    """تصفير عدّاد المواضيع (للاختبار أو بدء جلسة نظيفة)."""
-    global _STORE_TOPIC_TOTAL
-    for t in STORE_TOPICS:
-        _STORE_TOPIC_COUNTS[t] = 0
-    _STORE_TOPIC_TOTAL = 0
-
-
-def _store_prompt(persona, band, aspects, opener, used_block, avoid_line, ban_line):
-    """يبني برومبت المتجر مُكيّفًا مع نطاق الطول — القصير جدًّا يُسقط القصّة والافتتاحية
-    والجانب الثاني (لأنها تجرّ النموذج للإطالة)، والمتوسط وحده يسمح بالقصّة المصغّرة."""
-    who = (f"أنت العميل نفسه ({persona['label']}، عمره {persona['age']}، "
-           f"من {persona['city']}) تكتب بصيغة المتكلّم عن تجربتك.")
-    common = (f"- بلهجة سعودية عفوية بدون ترقيم ولا أرقام\n"
-              f"- لا تُخاطب أحدًا بالاسم ولا تستعمل نداءً («يا فلان» أو «يا صاحبي» أو «يا ربع»)، ولا تذكر اسمك\n"
-              f"{ban_line}{avoid_line}\n"
-              f"- لا تكرر هذه الصياغات:\n{used_block if used_block else '(لا يوجد سابق)'}\n"
-              f'أرجع JSON فقط: {{"rating": 5, "text": "..."}}')
-    if band == 'vshort':      # 2-5 كلمات
-        return (f'اكتب انطباعًا خاطفًا جدًّا عن متجر "مهووس للعطور" — من كلمتين إلى خمس كلمات فقط.\n'
-                f'{who}\n'
-                f'جملة واحدة قصيرة جدًّا عن: {aspects[0]}. بلا قصة وبلا مقدمات وبلا تفاصيل إضافية.\n'
-                f'{common}')
-    if band == 'short':       # 6-10 كلمات
-        return (f'اكتب تقييمًا قصيرًا (من ست إلى عشر كلمات) لمتجر "مهووس للعطور" بلهجة سعودية عامية.\n'
-                f'{who}\n'
-                f'ركّز على: {aspects[0]}. جملة أو جملتين فقط بلا إطالة.\n'
-                f'{common}')
-    # story (11-18 كلمات)
-    return (f'اكتب تقييمًا (من إحدى عشرة إلى ثماني عشرة كلمة، لا أكثر) لمتجر "مهووس للعطور" بلهجة سعودية عامية.\n'
-            f'{who}\n'
-            f'ركّز على هذين الجانبين: {aspects[0]} و{aspects[1]}.\n'
-            f'- {opener}\n'
-            f'- احكِ تجربتك كأنك تحكي لصاحبك، واذكر تفصيلة واحدة محددة\n'
-            f'{common}')
+# أسماء معروفة لحذف نداء الاسم (يمرَّرها كل تطبيق للوحدة المشتركة)
+_STORE_NAMES = set(NAMES.get('male', []) + NAMES.get('female', []) + NAMES.get('family_names', []))
+# عدّاد مواضيع المتجر لهذه العملية (سقف 20% لكل موضوع عبر الجلسة)
+_store_topics = StoreTopicTracker()
 
 
 def _ai_store_review(persona):
@@ -800,42 +607,41 @@ def _ai_store_review(persona):
 
     لا يُحقن مثال ذهبي (كان يُسحب كله من story_type واحد فيوحّد المخرج ويطبع القالب الطويل)؛
     STORE_ASPECTS المتنوّعة + الشخصية + سقف الموضوع + طول مُعايَن هي ما يقود التنوّع.
+    المنطق نفسه موحّد في store_review، يستورده مسار Streamlit كي لا يتباعد المساران.
     """
     # (1) هدف الطول — يُعيَّن قبل البرومبت (35% قصير جدًا · 40% قصير · 25% متوسط)
-    lo, hi, length_desc = _sample_length_target()
-    band = 'vshort' if hi <= 5 else ('short' if hi <= 10 else 'story')
+    lo, hi, length_desc = sample_length_target()
+    band = band_for(hi)
     # (2) اختيار الجوانب بعيدًا عن المواضيع المشبعة (≥20%)
-    blocked = _store_blocked_topics()
-    pool = [a for a in STORE_ASPECTS if _ASPECT_TOPIC.get(a) not in blocked]
+    blocked = _store_topics.blocked()
+    pool = [a for a in STORE_ASPECTS if ASPECT_TOPIC.get(a) not in blocked]
     if len(pool) < 2:
         pool = list(STORE_ASPECTS)
     aspects = random.sample(pool, k=2)
     opener = random.choice(STORE_OPENERS)
     used_block = _used_texts_block(limit=15, persona_name=persona.get('name'))
     avoid_line = (f"\n- ممنوع الحديث عن: {'، '.join(sorted(blocked))} (تكرّرت كثيرًا)" if blocked else '')
-    ban_line = ("- تكلّم بواقعية: ممنوع تشبيه العطر أو الطلب أو التغليف بالكنز أو الصندوق "
-                "أو المجوهرات أو الجوهرة أو الذهب أو الألماس أو التحفة")
 
-    prompt = _store_prompt(persona, band, aspects, opener, used_block, avoid_line, ban_line)
+    prompt = build_store_prompt(persona, band, aspects, opener, used_block, avoid_line)
     rv = _ai_write_json(prompt, max_tokens=200, attempts=5)  # يرفع AIUnavailable عند الفشل
 
     def _finalize(text):
         text = _humanize(text)  # بلا ترقيم أو رموز
         text = re.sub(r'\s+', ' ', re.sub(r'[0-9٠-٩]+', ' ', text)).strip()  # صفر أرقام (مسار المتجر)
-        return _strip_store_vocatives(text, persona.get('name'))  # منع النداء حتميًّا
+        return strip_store_vocatives(text, persona.get('name'), _STORE_NAMES)  # منع النداء حتميًّا
 
     text = _finalize(rv.get('text', ''))
 
     # (3) حارس موحّد: استعارة فخامة / موضوع مشبع / تجاوز الطول → إعادة توليد موجَّهة
     for _k in range(3):
         problems = []
-        if _has_luxury_metaphor(text):
+        if has_luxury_metaphor(text):
             problems.append('استعارة فخامة (كنز/صندوق/مجوهرات/ذهب) ممنوعة')
-        blocked_now = _store_blocked_topics()
-        if _STORE_TOPIC_TOTAL >= _TOPIC_FLOOR and _classify_store_topic(text) in blocked_now:
-            fresh = [a for a in STORE_ASPECTS if _ASPECT_TOPIC.get(a) not in blocked_now]
+        blocked_now = _store_topics.blocked()
+        if _store_topics.classify(text) in blocked_now:
+            fresh = [a for a in STORE_ASPECTS if ASPECT_TOPIC.get(a) not in blocked_now]
             alt = random.choice(fresh or STORE_ASPECTS)
-            problems.append(f"موضوع «{_classify_store_topic(text)}» تكرّر كثيرًا؛ اكتب عن {alt} بدلًا منه ولا تذكره")
+            problems.append(f"موضوع «{_store_topics.classify(text)}» تكرّر كثيرًا؛ اكتب عن {alt} بدلًا منه ولا تذكره")
         if len(text.split()) > hi + 2:
             problems.append(f"أطل من المطلوب؛ التزم بـ {length_desc}")
         if not problems:
@@ -847,7 +653,7 @@ def _ai_store_review(persona):
         text = _finalize(nxt['text'])
 
     # (4) ضمانات حتمية: صفر استعارة فخامة + احترام سقف نطاق الطول (كما يقصّ مسار المنتج)
-    text = _scrub_luxury_metaphor(text)
+    text = scrub_luxury_metaphor(text)
     words = text.split()
     if len(words) > hi:
         words = words[:hi]
@@ -857,7 +663,7 @@ def _ai_store_review(persona):
     rv['text'] = text
 
     # (5) تسجيل الموضوع النهائي في عدّاد الجلسة (بعد التثبيت)
-    _record_store_topic(text)
+    _store_topics.record(text)
 
     _register(text)
     if USE_ANTI_REPEAT:
