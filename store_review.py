@@ -215,9 +215,16 @@ def build_store_prompt(persona, band, aspects, opener, used_block,
     والافتتاحية والجانب الثاني، والمتوسط وحده يسمح بالقصّة المصغّرة."""
     who = (f"أنت العميل نفسه ({persona['label']}، عمره {persona['age']}، "
            f"من {persona['city']}) تكتب بصيغة المتكلّم عن تجربتك.")
+    # ══ طبقة الأنسنة: سطر مضغوط ضد بصمة الـAI (يمنع النبرة الإعلانية/الآلية) ══
+    # تدرّج آمن: إن غاب humanizer يبقى السطر فارغًا ولا يتأثّر البرومبت.
+    try:
+        import humanizer as _hz
+        _human_line = '\n' + _hz.anti_tell_line(kind='store')
+    except Exception:
+        _human_line = ''
     common = (f"- بلهجة سعودية عفوية بدون ترقيم ولا أرقام\n"
               f"- لا تُخاطب أحدًا بالاسم ولا تستعمل نداءً («يا فلان» أو «يا صاحبي» أو «يا ربع»)، ولا تذكر اسمك\n"
-              f"{ban_line}{avoid_line}\n"
+              f"{ban_line}{avoid_line}{_human_line}\n"
               f"- لا تكرر هذه الصياغات:\n{used_block if used_block else '(لا يوجد سابق)'}\n"
               f'أرجع JSON فقط: {{"rating": 5, "text": "..."}}')
     if band == 'vshort':      # 2-5 كلمات

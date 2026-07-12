@@ -87,6 +87,13 @@ try:
 except ImportError:
     pass
 
+USE_HUMANIZER = False
+try:
+    from humanizer import humanize_output as hz_humanize_output, content_tells as hz_content_tells
+    USE_HUMANIZER = True
+except ImportError:
+    pass
+
 USE_DEMO_MATCH = False
 try:
     import demographic_matcher as _demo   # مطابقة ديموغرافية (علم تحكّم)
@@ -476,6 +483,8 @@ def gen_reviews(persona, perfumes):
                     txt = apply_typos(txt, 1.0)
                 except Exception:
                     pass
+            if USE_HUMANIZER:
+                txt = hz_humanize_output(txt, kind='review')  # أنسنة قبل التنظيف
             txt = _humanize(txt)
             if not txt.strip():
                 # قانون 4: لا نص وهمي — نتوقف ونُظهر خطأ بدل الفبركة.
@@ -484,12 +493,16 @@ def gen_reviews(persona, perfumes):
             # ══ الحارس الدلالي: نزيف/بتر/تجاوز → إعادة توليد ثم قص وإنقاذ الذيل ══
             if USE_SEMANTIC_GUARD:
                 _viol = guard_violations(txt, max_words=_allow)
+                if USE_HUMANIZER:
+                    _viol = _viol + hz_content_tells(txt)
                 if _viol:
                     _hint = (f'\n\n⚠️ رُفض النص السابق «{txt}» ({"، ".join(_viol)}). '
                              f'اكتب تقييماً جديداً عن العطر نفسه فقط، جملة مكتملة المعنى، {_tgt} كلمات كحد أقصى.')
                     _rv2 = ai_write_unique(prompt + _hint, max_tokens=mx, attempts=2)
                     _t2 = (_rv2.get('text') if isinstance(_rv2, dict) else '') or ''
                     if _t2.strip():
+                        if USE_HUMANIZER:
+                            _t2 = hz_humanize_output(_t2, kind='review')
                         txt = _humanize(_t2)
                 _w = txt.split()
                 if len(_w) > _allow:
@@ -546,6 +559,8 @@ def gen_store_review(persona):
     prompt = build_store_prompt(persona, band, aspects, opener, ub, avoid_line)
 
     def _finalize(text):
+        if USE_HUMANIZER:
+            text = hz_humanize_output(text or '', kind='store')  # إزالة إطار المساعد/الماركداون
         text = _humanize(text or '')  # بلا ترقيم أو رموز
         text = re.sub(r'\s+', ' ', re.sub(r'[0-9٠-٩]+', ' ', text)).strip()  # صفر أرقام
         return strip_store_vocatives(text, pname, _STORE_NAMES)  # منع النداء حتميًّا
@@ -565,6 +580,9 @@ def gen_store_review(persona):
             problems.append(f"موضوع «{_store_topics.classify(txt)}» تكرّر كثيرًا؛ اكتب عن {alt} بدلًا منه ولا تذكره")
         if len(txt.split()) > hi + 2:
             problems.append(f"أطل من المطلوب؛ التزم بـ {length_desc}")
+        if USE_HUMANIZER:
+            for _tl in hz_content_tells(txt, kind='store'):
+                problems.append(f'أنسنة: {_tl}')
         if not problems:
             break
         hint = "\n\n⚠️ أعد الكتابة: " + " · ".join(problems)

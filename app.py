@@ -114,6 +114,16 @@ except ImportError:
     print('\u26a0\ufe0f semantic_guard not found')
 
 try:
+    import humanizer as _hz
+    from humanizer import humanize_output as hz_humanize_output, content_tells as hz_content_tells
+    USE_HUMANIZER = True
+    print('\u2705 humanizer loaded (%d marketing tells, %d voices)'
+          % (len(_hz.AR_MARKETING_TELLS), _hz.stats()['scraped_voices']))
+except ImportError:
+    USE_HUMANIZER = False
+    print('\u26a0\ufe0f humanizer not found')
+
+try:
     from trending import calculate_product_weight, get_trending_names, blend_selection
     USE_TRENDING = True
     print('\u2705 trending loaded')
@@ -533,6 +543,9 @@ def _write_review(persona, pf, prompt, params):
         for _k in range(2):
             _t = _humanize(rv.get('text', ''))
             _viol = guard_violations(_t, max_words=_allow)
+            # طبقة الأنسنة: نبرة إعلانية/آلية أو خاتمة عامة → تُعامَل كمخالفة تُعاد
+            if USE_HUMANIZER:
+                _viol = _viol + hz_content_tells(_t)
             if not _viol:
                 break
             _hint = (f'\n\n⚠️ رُفض النص السابق «{_t}» ({"، ".join(_viol)}). '
@@ -550,8 +563,11 @@ def _write_review(persona, pf, prompt, params):
     # أخطاء إملائية طبيعية (تزيد التفرّد ولا تنقصه)
     if USE_DIALECTS and persona.get('has_typo', False):
         rv['text'] = apply_typos(rv['text'], probability=1.0)
-    # تنظيف نهائي: نص بشري متدفّق بلا ترقيم أو رموز (ضمان مطلق)
-    rv['text'] = _humanize(rv.get('text', ''))
+    # تنظيف نهائي: أنسنة (إزالة إطار المساعد/الماركداون/الشرطات) ثم نص متدفّق بلا ترقيم
+    _txt = rv.get('text', '')
+    if USE_HUMANIZER:
+        _txt = hz_humanize_output(_txt, kind='review')
+    rv['text'] = _humanize(_txt)
     # ══ قص أخير عند الحد المعاين + إنقاذ الذيل المبتور (لا شظايا) ══
     _words = rv['text'].split()
     if len(_words) > _allow:
@@ -626,6 +642,8 @@ def _ai_store_review(persona):
     rv = _ai_write_json(prompt, max_tokens=200, attempts=5)  # يرفع AIUnavailable عند الفشل
 
     def _finalize(text):
+        if USE_HUMANIZER:
+            text = hz_humanize_output(text, kind='store')  # إزالة إطار المساعد/الماركداون
         text = _humanize(text)  # بلا ترقيم أو رموز
         text = re.sub(r'\s+', ' ', re.sub(r'[0-9٠-٩]+', ' ', text)).strip()  # صفر أرقام (مسار المتجر)
         return strip_store_vocatives(text, persona.get('name'), _STORE_NAMES)  # منع النداء حتميًّا
@@ -644,6 +662,9 @@ def _ai_store_review(persona):
             problems.append(f"موضوع «{_store_topics.classify(text)}» تكرّر كثيرًا؛ اكتب عن {alt} بدلًا منه ولا تذكره")
         if len(text.split()) > hi + 2:
             problems.append(f"أطل من المطلوب؛ التزم بـ {length_desc}")
+        if USE_HUMANIZER:
+            for _tl in hz_content_tells(text, kind='store'):
+                problems.append(f'أنسنة: {_tl}')
         if not problems:
             break
         hint = "\n\n⚠️ أعد الكتابة: " + " · ".join(problems)

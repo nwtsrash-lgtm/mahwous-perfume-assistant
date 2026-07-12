@@ -1423,6 +1423,20 @@ def build_master_prompt(persona, product_name, review_params, used_texts_block='
         used_texts_block=used_texts_block if used_texts_block else '(لا يوجد سابق)',
     )
 
+    # ══ طبقة الأنسنة (Humanizer): توجيه استباقي ضد بصمة الـAI + معايرة صوت ══
+    # المايكرو-مراجعة (≤6 كلمات) تكتفي بسطر مضغوط؛ الأطول تحصل على معايرة صوت
+    # من مراجعات حقيقية (real_reviews_bank + منافسون مكشوطون). تدرّج آمن إن غاب.
+    try:
+        import humanizer as _hz
+        if len_target and len_target > _hz.MICRO_MAX_WORDS:
+            _vb = _hz.voice_calibration_block(
+                kind='review', gender=persona.get('gender'), n=5, seed_text=product_name)
+            prompt += '\n\n' + (_vb or _hz.anti_tell_line())
+        else:
+            prompt += '\n\n' + _hz.anti_tell_line()
+    except Exception:
+        pass
+
     return prompt, review_params
 
 
