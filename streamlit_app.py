@@ -455,7 +455,9 @@ def gen_reviews(persona, perfumes):
             # تنبيهات الجنس/الهدية/نوع المنتج — نفس منطق Flask (مكياج/معطر شعر/هدية...)
             extra = build_context_hints(persona, pf)
             # اسم نظيف (بلا لاحقة سعر) ليعمل بحث الكتالوج وبيانات المنتج بدقة
-            prompt = build_master_prompt(
+            # build_master_prompt يرجع (prompt, review_params) — عدم فكّها كان يمرر tuple لـ
+            # ai_write_unique فينفجر "can only concatenate tuple (not str) to tuple" عند أي محاولة توليد.
+            prompt, review_params = build_master_prompt(
                 persona=persona,
                 product_name=pf['name'],
                 review_params=review_params,
