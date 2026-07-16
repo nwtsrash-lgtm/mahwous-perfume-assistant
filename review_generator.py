@@ -148,6 +148,19 @@ except Exception:
         return list(words)
 
 
+# أدوات ربط، لا تشير لموضوع — لا تُحسب تكراراً (مثل STOP في anti_repeat).
+_GROW_STOPWORDS = set(
+    'و من في على عن إلى الى لي له لها ما لا او أو بس كل أي اي يا مع هذا '
+    'هذه هذي حتى بعد قبل ذا اللي التي الذي عليه فيه منه لكم لكن ثم قد لم '
+    'لن إن ان لو إذا اذا عند مو كان صار'.split())
+
+
+def _content_words(phrase):
+    """كلمات المحتوى (≥3 أحرف، بلا أدوات ربط) — أساس منع تكرار الموضوع."""
+    return {w.strip('.,!؟،') for w in phrase.split()
+            if len(w.strip('.,!؟،')) >= 3 and w.strip('.,!؟،') not in _GROW_STOPWORDS}
+
+
 # ═══════════════════════════════════════════════════════════
 #  بنوك العبارات
 # ═══════════════════════════════════════════════════════════
@@ -919,17 +932,26 @@ class ReviewGenerator:
 
         يحلّ مشكلة القصّ-فقط: حين تُنتج القوالب أقصر من المستهدف، نُكمّل
         بمقاطع إضافية (بلا تكرار مقطع) بدل ترك النص أقصر فيسرّب للشرائح الأدنى.
+
+        بلا تكرار موضوع: مقطعان من نفس البنك غالباً يشتركان بكلمة المحور
+        («ثباته»/«ريحته»/«المقدمه»/«أنصح») — رصدناها فعلياً («المقدمه فريشه
+        ...المقدمه حاره...») فتقرأ كتلصيق قوالب لا سرد إنسان واحد. نمنع أي
+        مقطع جديد يشارك كلمة محتوى مع ما اختير فعلاً.
         """
         parts = list(seed_parts)
         used = set(parts)
+        used_words = set()
+        for p in parts:
+            used_words |= _content_words(p)
         guard = 0
         while len(' '.join(parts).split()) < (target or 0) and \
                 len(parts) < max_parts and guard < 20:
             guard += 1
             choice = random.choice(random.choice(pools))
-            if choice in used:
+            if choice in used or _content_words(choice) & used_words:
                 continue
             used.add(choice)
+            used_words |= _content_words(choice)
             parts.append(choice)
         return self._fit_length(' '.join(parts), target)
 

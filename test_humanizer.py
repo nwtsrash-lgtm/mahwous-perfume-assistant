@@ -133,3 +133,33 @@ def test_content_tells_excludes_typographic():
 def test_stats_shape():
     s = hz.stats()
     assert s['marketing_tells'] > 20 and s['scraped_voices'] >= 0
+
+
+# ═══════════ تكرار كلمة محورية (قوالب ملتصقة / سهو الـAI) ═══════════
+def test_detect_nonadjacent_word_repeat():
+    tells = hz.detect(
+        'المقدمه فريشه والقلب زهري والقاعده مسك أبيض المقدمه حاره شوي والقلب ناعم'
+    )
+    assert 'تكرار كلمة محورية' in tells
+
+
+def test_repeat_detection_is_content_tell():
+    ct = hz.content_tells(
+        'ثباته على الجلد أقل شوي بس على القماش وحش أنصح فيه خلوه بقائمتكم ثباته يختلف حسب البشره'
+    )
+    assert 'تكرار كلمة محورية' in ct
+
+
+def test_adjacent_repeat_not_flagged():
+    # «فخم فخم» تشديد لهجة مقصود ومعاير على بيانات منافسين حقيقية — ليس عيباً
+    assert hz.detect('فخم فخم بمعنى الكلمة والله صراحه') == []
+
+
+def test_single_mention_not_flagged():
+    # ذكر عادي لكلمة («يهبل») مرة واحدة يجب ألا يُحسب تكراراً
+    assert hz.detect('هذا العطر يهبل صراحه وريحته حلوة جدا ما توقعت يكون بهالجوده') == []
+
+
+def test_repeat_not_flagged_on_micro_review():
+    # المايكرو-مراجعة (≤6 كلمات) لا تخضع لفحص التكرار — لا معنى له بهالطول
+    assert hz.detect('يهبل ويفوز يهبل') == []

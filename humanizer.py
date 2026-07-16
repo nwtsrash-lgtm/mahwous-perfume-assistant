@@ -105,6 +105,29 @@ AR_GENERIC_CLOSERS = [
 _RULE_OF_THREE_RE = re.compile(
     r'(\S+)\s+و(\S+)\s+و(\S+)')
 
+# تكرار كلمة محورية غير متجاورة — مرصود ميدانياً في المولّد القالبي («المقدمه
+# فريشه...المقدمه حاره...»، «ثباته...ثباته...») حيث يبدو النص كقوالب ملتصقة
+# لا سرد إنسان واحد. نفس الخطر ممكن من الـAI الحي (تكرار سهو لكلمة كـ«يهبل»).
+# التكرار المتجاور («فخم فخم») تشديد لهجة مقصود ومعاير على بيانات حقيقية —
+# لا يُحسب هنا؛ نطلب فاصل كلمة واحدة على الأقل.
+_REPEAT_STOPWORDS = set(
+    'و من في على عن إلى الى لي له لها ما لا او أو بس كل أي اي يا مع هذا '
+    'هذه هذي حتى بعد قبل ذا اللي التي الذي عليه فيه منه لكم لكن ثم قد لم '
+    'لن إن ان لو إذا اذا عند مو كان صار'.split())
+
+
+def _has_nonadjacent_repeat(text):
+    """كلمة محتوى (≥3 أحرف، بلا أدوات ربط) تتكرر بفاصل كلمة أو أكثر."""
+    last_seen = {}
+    for i, w in enumerate((text or '').split()):
+        w = w.strip('.,!؟،')
+        if len(w) < 3 or w in _REPEAT_STOPWORDS:
+            continue
+        if w in last_seen and i - last_seen[w] >= 2:
+            return True
+        last_seen[w] = i
+    return False
+
 
 def _compile_phrase_list(phrases):
     """يبني Regex يطابق أياً من العبارات ككلمة/عبارة مستقلة (مع أدوات عطف شائعة)."""
@@ -176,6 +199,9 @@ def detect(text, kind='review'):
     # قاعدة الثلاثة تُحسب علامة في النص الأطول فقط
     if word_count(text) > MICRO_MAX_WORDS and _RULE_OF_THREE_RE.search(text):
         tells.append('قاعدة الثلاثة')
+    # تكرار كلمة محورية: نفس المنطق — يشوّه المايكرو-مراجعة القصيرة لو طُبّق عليها
+    if word_count(text) > MICRO_MAX_WORDS and _has_nonadjacent_repeat(text):
+        tells.append('تكرار كلمة محورية')
     return tells
 
 
@@ -188,7 +214,7 @@ def humanizer_violations(text, max_words=None, kind='review'):
 # علامات على مستوى المحتوى فقط (تنجو من _humanize الذي يزيل الترقيم/الرموز).
 # تُستخدم لتوجيه إعادة التوليد: نص بنبرة إعلانية/آلية يُعاد لا يُبتر.
 _CONTENT_TELLS = {'مبالغة دعائية فصحى', 'آثار مساعد آلي', 'تلميح استعراضي',
-                  'خاتمة تحفيزية عامة', 'قاعدة الثلاثة'}
+                  'خاتمة تحفيزية عامة', 'قاعدة الثلاثة', 'تكرار كلمة محورية'}
 
 
 def content_tells(text, kind='review'):
