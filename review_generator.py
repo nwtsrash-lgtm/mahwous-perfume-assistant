@@ -147,6 +147,30 @@ except Exception:
     def _strip_broken_tail(words):
         return list(words)
 
+try:
+    from anti_repeat import TRACKED_WORDS as _SHARED_TRACKED_WORDS
+except Exception:
+    _SHARED_TRACKED_WORDS = []  # تدرّج ناعم — لا كسر لو تعذّر الاستيراد
+
+# نسبة حضور مستهدفة (% من التقييمات التي تحوي الكلمة) بهامش أمان ×2 فوق
+# القيمة الخام المقاسة من الكشط الشامل (452 نصاً منافس حقيقي، competitor_
+# reviews_full.json) — لا تطابق حرفي (البنوك محدودة العدد ولن تُفرغ
+# الخيارات بلا داعٍ)، فقط كبح الاختلال الفاحش. كلمات _BURN_WORDS الأخرى
+# بلا رقم مقاس مباشرة تأخذ _DEFAULT_HOT_TARGET.
+_HOT_WORD_TARGETS = {
+    'ريحته': 0.06, 'ريحه': 0.03, 'والله': 0.02, 'يستاهل': 0.01,
+    'ثباته': 0.03, 'فوحانه': 0.02, 'بطل': 0.01,
+}
+_DEFAULT_HOT_TARGET = 0.05
+_LOCAL_HOT_WORDS = list(_HOT_WORD_TARGETS)
+# قائمة الكلمات المحروقة الموحّدة — anti_repeat.TRACKED_WORDS (مبالغات
+# دعائية تُغذّى أصلاً لبرومبت الـAI الحي) + كلماتنا المقاسة محلياً، مطبَّقة
+# هنا كنسبة حضور بدل عدّاد مطلق (جُرِّب عدّاد ≥3 ثابت: إما تراكمي بلا نافذة
+# فيُصفّر الكلمة نهائياً بعد أول 3 استخدامات في 1000 تقييم — رُصد فعلياً
+# «ريحته» 10.9%→0.4% أقل من نسبة المنافس 2.7%؛ أو نافذة 20/عتبة 3 = سقف
+# 15% لا يكبح شيئاً فعلياً أمام قاعدة بها ~20% من عباراتها تبدأ بالكلمة).
+_BURN_WORDS = list(_SHARED_TRACKED_WORDS) + _LOCAL_HOT_WORDS
+
 
 # أدوات ربط، لا تشير لموضوع — لا تُحسب تكراراً (مثل STOP في anti_repeat).
 _GROW_STOPWORDS = set(
@@ -750,6 +774,10 @@ class ReviewGenerator:
         self._len_pool = load_length_pool()
         # تكرار العبارات القصيرة — الواقع يكرّرها، فنسمح بسقف واقعي بدل منعها
         self._short_freq = Counter()
+        # نافذة متحركة من آخر 80 تقييماً — عيّنة كافية لتقدير نسبة حضور
+        # مستقرة إحصائياً (نافذة 20 جُرِّبت وفشلت: عتبة عدّاد ثابتة عليها
+        # لا تكبح شيئاً أمام قاعدة ~20% من عباراتها تحوي الكلمة الساخنة)
+        self._recent_texts = deque(maxlen=80)
         print(f"[✓] مولّد التقييمات السعودية v3.1 جاهز — معاير على "
               f"{len(self._len_pool)} تقييم منافس")
 
@@ -757,9 +785,40 @@ class ReviewGenerator:
     #  أدوات مساعدة داخلية
     # ══════════════════════════════════════════════════════════════
 
+    def _is_burned(self, phrase, min_sample=10):
+        """هل تحوي العبارة كلمة تجاوزت نسبة حضورها المستهدفة في آخر نافذة
+        متحركة من التقييمات؟ نسبة لا عدّاد مطلق — عدّاد ثابت (≥3 مرات) جُرِّب
+        وفشل بالاتجاهين: تراكمي بلا نافذة صفّر الكلمة نهائياً بعد أول 3
+        استخدامات في دفعة 1000 («ريحته» 10.9%→0.4%، تصحيح مفرط)؛ نافذة 20
+        بعتبة 3 = سقف 15% لا يكبح شيئاً أمام قاعدة ~20% من عباراتها ساخنة.
+        عيّنة أقل من min_sample لا نحكم عليها بعد (تفادي قرار على ضوضاء).
+        """
+        n = len(self._recent_texts)
+        if n < min_sample:
+            return False
+        for w in _BURN_WORDS:
+            if w not in phrase:
+                continue
+            target = _HOT_WORD_TARGETS.get(w, _DEFAULT_HOT_TARGET)
+            rate = sum(1 for t in self._recent_texts if w in t) / n
+            if rate > target:
+                return True
+        return False
+
+    def _register_burn(self, text):
+        """تُستدعى بعد اكتمال كل تقييم — تُحدّث النافذة المتحركة."""
+        self._recent_texts.append(text)
+
     def _pick(self, items):
+        """اختيار من بركة عبارات — يتجنّب العبارات «المحروقة» قدر الإمكان؛
+        يسقط للاختيار العشوائي العادي لو لم يبقَ خيار غير محروق (لا يُفرغ
+        الخيارات أبداً — قانون-4)."""
         if not items:
             return ""
+        if _BURN_WORDS:
+            fresh = [p for p in items if not self._is_burned(p)]
+            if fresh:
+                return random.choice(fresh)
         return random.choice(items)
 
     def _classify_price(self, price):
@@ -849,7 +908,7 @@ class ReviewGenerator:
         """حقن عبارة SEO في 10-15% من المراجعات"""
         if random.random() > 0.125:
             return text
-        comp = random.choice(SEO_COMPARISONS)
+        comp = self._pick(SEO_COMPARISONS)
         if gender == 'female':
             brand = random.choice(SEO_BRANDS_FEMALE)
         elif gender == 'male':
@@ -914,17 +973,20 @@ class ReviewGenerator:
                 return chained
         bucket = SHORTS_BY_LEN.get(L, [])
         if bucket:
-            return random.choice(bucket)
+            return self._pick(bucket)
         # احتياطي: قصّ عبارة أطول إلى الطول المطلوب (تنوّع غير محدود)
         longer = SHORTS_BY_LEN.get(4) or STANDALONE_SHORTS
-        return self._fit_length(random.choice(longer), L)
+        return self._fit_length(self._pick(longer), L)
 
     def _chain_shorts(self, k):
         """يبني عبارة من k كلمة بسلسلة صفات مفردة («فخم وثابت وراقي»)."""
         ones = SHORTS_BY_LEN.get(1) or []
         if len(ones) < k:
             return ''
-        picks = random.sample(ones, k)
+        pool = [w for w in ones if not self._is_burned(w)] if _BURN_WORDS else ones
+        if len(pool) < k:
+            pool = ones  # لا يبقى خيار كافٍ غير محروق — نسقط للبركة كاملة
+        picks = random.sample(pool, k)
         return ' '.join([picks[0]] + ['و' + w for w in picks[1:]])
 
     def _grow_to(self, seed_parts, pools, target, max_parts):
@@ -947,8 +1009,8 @@ class ReviewGenerator:
         while len(' '.join(parts).split()) < (target or 0) and \
                 len(parts) < max_parts and guard < 20:
             guard += 1
-            choice = random.choice(random.choice(pools))
-            if choice in used or _content_words(choice) & used_words:
+            choice = self._pick(random.choice(pools))
+            if not choice or choice in used or _content_words(choice) & used_words:
                 continue
             used.add(choice)
             used_words |= _content_words(choice)
@@ -960,8 +1022,8 @@ class ReviewGenerator:
         """محرك العبارات المتوسطة — يبني للأعلى حتى الطول المستهدف (5-14)."""
         seed = []
         if random.random() < 0.60:
-            seed.append(random.choice(MEDIUM_CONTEXTS))
-        seed.append(random.choice(MEDIUM_OPINIONS))
+            seed.append(self._pick(MEDIUM_CONTEXTS))
+        seed.append(self._pick(MEDIUM_OPINIONS))
         return self._grow_to(seed,
                              [MEDIUM_OPINIONS, MEDIUM_CONTEXTS, MEDIUM_CLOSERS],
                              target_words or 6, max_parts=6)
@@ -969,7 +1031,7 @@ class ReviewGenerator:
     def _generate_detailed(self, product_name, price, category, gender,
                             persona, dialect, target_words=None):
         """محرك التقييمات المفصّلة — يبني للأعلى حتى الطول المستهدف (15+)."""
-        seed = [random.choice(DETAILED_OPENINGS), random.choice(SCENT_ANALYSIS)]
+        seed = [self._pick(DETAILED_OPENINGS), self._pick(SCENT_ANALYSIS)]
         pools = [LONGEVITY_REPORTS, SCENT_ANALYSIS, MEDIUM_CONTEXTS,
                  MEDIUM_OPINIONS, MEDIUM_CLOSERS]
         return self._grow_to(seed, pools, target_words or 18, max_parts=10)
@@ -1021,12 +1083,12 @@ class ReviewGenerator:
                 # لا نُلصق عذرًا طويلًا على تقييم قصير — نستبدله بقصير سلبي/محايد
                 short_neg = (SHORT_NEUTRAL_BY_LEN.get(target_words) or
                              SHORT_NEGATIVE_BY_LEN.get(target_words))
-                text = random.choice(short_neg) if short_neg else text
+                text = self._pick(short_neg) if short_neg else text
             else:
-                text = f"{text} {random.choice(THREE_STAR_EXCUSES)}"
+                text = f"{text} {self._pick(THREE_STAR_EXCUSES)}"
         elif rating == 4:
             if tier != 'ultra_short' and random.random() < 0.60:
-                note = random.choice(FOUR_STAR_NOTES)
+                note = self._pick(FOUR_STAR_NOTES)
                 text = f"{text} {note}"
 
         # حقن SEO (فقط للمتوسطة والمفصّلة)
@@ -1054,6 +1116,7 @@ class ReviewGenerator:
         text = re.sub(r'\s+و\s*$', '', text).strip()
         text = re.sub(r'^\s*[-–—،.]\s*', '', text).strip()
 
+        self._register_burn(text)
         return {
             'text': text,
             'rating': rating,
