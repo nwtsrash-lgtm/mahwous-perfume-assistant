@@ -112,9 +112,10 @@ async function gen(){
       saveArch();
     }
     const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+    if(!r.ok){const e=await r.json().catch(()=>({}));tw('❌ '+(e.message||('خطأ '+r.status)));b.disabled=false;b.textContent='✨ ولّد شخصية جديدة';return;}
     D=[await r.json()];
     render();saveSession();updateArchBtn();
-  }catch(e){tw('❌ خطأ')}
+  }catch(e){tw('❌ تعذّر الاتصال بالخادم')}
   b.disabled=false;b.textContent='✨ ولّد شخصية جديدة';
 }
 

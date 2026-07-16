@@ -261,16 +261,56 @@ if _env_path.exists():
             k, v = line.split('=', 1)
             os.environ[k.strip()] = v.strip()
 
-# يقبل عدة أسماء شائعة للمتغيّر (Railway قد يستخدم OPENROUTER_API_KEY)
-AI_KEY = (os.environ.get('AI_KEY')
-          or os.environ.get('OPENROUTER_API_KEY')
-          or os.environ.get('OPENROUTER_KEY')
-          or os.environ.get('OPENROUTER_API')
-          or '').strip()
-AI_URL = 'https://openrouter.ai/api/v1/chat/completions'
-AI_MODEL = 'google/gemini-2.5-flash'
+# ── مفتاح الـ AI ──
+# يقبل عدة أسماء شائعة صراحةً، ثم — إن لم يجد — يمسح البيئة عن أي متغيّر يحمل
+# مفتاح OpenRouter (قيمته تبدأ بـ sk-or- أو اسمه يحوي OPENROUTER). هذا يعالج
+# الحالة التي يسمّي فيها المستخدم المتغيّر في Railway باسم غير متوقّع فيبدو
+# «المفتاح متصل» بينما التطبيق لا يقرأه. يُزيل أي علامات اقتباس/مسافات محيطة.
+def _clean_key(v):
+    return (v or '').strip().strip('"').strip("'").strip()
+
+_KEY_NAMES = ('AI_KEY', 'OPENROUTER_API_KEY', 'OPENROUTER_KEY',
+              'OPENROUTER_API', 'OPENROUTER', 'OPEN_ROUTER_API_KEY', 'API_KEY')
+AI_KEY = ''
+AI_KEY_SOURCE = ''
+for _n in _KEY_NAMES:
+    _v = _clean_key(os.environ.get(_n))
+    if _v:
+        AI_KEY, AI_KEY_SOURCE = _v, _n
+        break
+# مسح احتياطي: أي متغيّر بيئة قيمته تشبه مفتاح OpenRouter أو اسمه يحوي OPENROUTER
+if not AI_KEY:
+    for _n, _raw in os.environ.items():
+        _v = _clean_key(_raw)
+        if _v and (_v.startswith('sk-or-') or 'OPENROUTER' in _n.upper()):
+            AI_KEY, AI_KEY_SOURCE = _v, _n
+            break
+
+AI_URL = os.environ.get('AI_URL', 'https://openrouter.ai/api/v1/chat/completions').strip()
+AI_MODEL = os.environ.get('AI_MODEL', 'google/gemini-2.5-flash').strip()  # قابل للتبديل عبر البيئة
 AI_TIMEOUT = int(os.environ.get('AI_TIMEOUT', '45'))   # مهلة أطول: نقبل البطء مقابل تقييم صحيح
 AI_TEMPERATURE = 0.9     # درجة إبداع عالية لضمان تنوع النصوص
+
+# سجل حالة المفتاح وقت الإقلاع — يظهر في لوج Railway حتى تحت gunicorn
+# (الطباعة القديمة كانت داخل if __name__=='__main__' ولا تعمل مع gunicorn).
+print(('🔑 AI_KEY: loaded from %s (***%s)' % (AI_KEY_SOURCE, AI_KEY[-6:]))
+      if AI_KEY else
+      '🔑 AI_KEY: MISSING — لم يُعثر على أي مفتاح OpenRouter في متغيّرات البيئة',
+      flush=True)
+print('🤖 AI_MODEL: %s' % AI_MODEL, flush=True)
+
+# آخر خطأ فعلي من الـ AI — يُعرض في /api/ai-check وفي رسائل الفشل بدل الرسالة العامة
+_LAST_AI_ERROR = {'when': None, 'status': None, 'message': None}
+
+
+def _record_ai_error(status, message):
+    """يخزّن آخر خطأ فعلي من OpenRouter ليُعرض في التشخيص بدل «المفتاح غير متصل»."""
+    _LAST_AI_ERROR['status'] = status
+    _LAST_AI_ERROR['message'] = str(message)[:300]
+    try:
+        _LAST_AI_ERROR['when'] = time.strftime('%Y-%m-%d %H:%M:%S')
+    except Exception:
+        _LAST_AI_ERROR['when'] = None
 
 
 class AIUnavailable(Exception):
@@ -309,7 +349,11 @@ def extract_json(text):
 
 
 def _ai_call(prompt, max_tokens=1200, temperature=AI_TEMPERATURE):
-    """استدعاء AI عبر OpenRouter — جلسة ثابتة + Retry + مهلة 15ث"""
+    """استدعاء AI عبر OpenRouter — جلسة ثابتة + Retry. يسجّل آخر خطأ فعلي."""
+    if not AI_KEY:
+        _record_ai_error('no_key', 'لا يوجد مفتاح OpenRouter في متغيّرات البيئة')
+        print('❌ AI: no key configured', flush=True)
+        return None
     try:
         r = _ai_session.post(AI_URL, json={
             'model': AI_MODEL,
@@ -317,14 +361,19 @@ def _ai_call(prompt, max_tokens=1200, temperature=AI_TEMPERATURE):
             'max_tokens': max_tokens,
             'temperature': temperature,
         }, timeout=AI_TIMEOUT)
-        data = r.json()
         if r.status_code != 200:
-            err = data.get('error',{}).get('message','unknown')
-            print(f'⚠️ AI HTTP {r.status_code}: {err}')
+            try:
+                err = r.json().get('error', {}).get('message', r.text[:200])
+            except Exception:
+                err = r.text[:200]
+            _record_ai_error(r.status_code, err)
+            print(f'⚠️ AI HTTP {r.status_code}: {err}', flush=True)
             return None
+        data = r.json()
         return data['choices'][0]['message']['content'].strip()
     except Exception as e:
-        print(f'❌ AI Error: {e}')
+        _record_ai_error('exception', e)
+        print(f'❌ AI Error: {e}', flush=True)
         return None
 
 def _make_persona_for_arch(arch):
@@ -958,13 +1007,90 @@ def health():
         'products': len(PRODUCTS),
         'archive': len(_load_archive().get('reviews', [])),
         'data_dir': str(DATA_DIR),
+        'ai_key_loaded': bool(AI_KEY),
+        'ai_key_source': AI_KEY_SOURCE or None,
+        'ai_model': AI_MODEL,
     })
 
+
+@app.route('/api/ai-check')
+def ai_check():
+    """تشخيص حيّ لحالة مفتاح OpenRouter — يجيب: هل المفتاح محمّل؟ وما ردّ الـ AI فعلاً؟
+
+    افتح هذا الرابط في المتصفّح لمعرفة السبب الحقيقي عند فشل التوليد بدل
+    الرسالة العامة «تعذّر الاتصال». يعرض حالة HTTP الفعلية من OpenRouter
+    (401 = مفتاح خاطئ · 402 = نفاد رصيد · 404 = نموذج غير موجود).
+    """
+    info = {
+        'key_loaded': bool(AI_KEY),
+        'key_source': AI_KEY_SOURCE or None,
+        'key_masked': ('***' + AI_KEY[-6:]) if AI_KEY else None,
+        'model': AI_MODEL,
+        'url': AI_URL,
+        'last_error': _LAST_AI_ERROR,
+    }
+    if not AI_KEY:
+        info['ok'] = False
+        info['reason'] = ('لا يوجد مفتاح — لم يُعثر على أي متغيّر بيئة يحمل مفتاح '
+                          'OpenRouter. أضِف AI_KEY (أو OPENROUTER_API_KEY) في '
+                          'Railway → Variables ثم أعد النشر (Redeploy).')
+        return jsonify(info), 200
+    # ping حقيقي بأقل عدد توكنز لكشف السبب الفعلي
+    try:
+        r = _ai_session.post(AI_URL, json={
+            'model': AI_MODEL,
+            'messages': [{'role': 'user', 'content': 'قل: تم'}],
+            'max_tokens': 5,
+        }, timeout=AI_TIMEOUT)
+        info['http_status'] = r.status_code
+        info['ok'] = (r.status_code == 200)
+        if r.status_code == 200:
+            try:
+                info['sample'] = r.json()['choices'][0]['message']['content'][:80]
+            except Exception:
+                info['sample'] = ''
+        else:
+            try:
+                info['error'] = r.json().get('error', {})
+            except Exception:
+                info['error'] = r.text[:300]
+            if r.status_code == 401:
+                info['reason'] = 'المفتاح مرفوض (401) — القيمة غير صحيحة أو منتهية. انسخ مفتاحاً جديداً من openrouter.ai/keys.'
+            elif r.status_code == 402:
+                info['reason'] = 'نفاد الرصيد (402) — أضِف رصيداً في حساب OpenRouter.'
+            elif r.status_code == 404:
+                info['reason'] = f'النموذج «{AI_MODEL}» غير متاح (404) — بدّله عبر متغيّر البيئة AI_MODEL.'
+            elif r.status_code == 429:
+                info['reason'] = 'تجاوز الحد (429) — انتظر قليلاً أو ارفع حد حسابك في OpenRouter.'
+    except Exception as e:
+        info['ok'] = False
+        info['error'] = str(e)[:300]
+        info['reason'] = 'تعذّر الوصول إلى OpenRouter (شبكة/مهلة).'
+    return jsonify(info), 200
+
+
 def _ai_unavailable_response():
-    """رد موحّد عند تعذّر الـ AI — التطبيق توقّف ولم يكتب أي قالب."""
+    """رد موحّد عند تعذّر الـ AI — يكشف السبب الحقيقي بدل رسالة عامة مضلّلة."""
+    status = _LAST_AI_ERROR.get('status')
+    reason = _LAST_AI_ERROR.get('message')
+    if not AI_KEY or status == 'no_key':
+        msg = ('مفتاح OpenRouter غير محمّل. اضبط AI_KEY أو OPENROUTER_API_KEY في '
+               'Railway ثم أعد النشر. افتح /api/ai-check للتشخيص.')
+    elif status == 401:
+        msg = 'المفتاح مرفوض من OpenRouter (401) — القيمة غير صحيحة أو منتهية. جدّد المفتاح. افحص /api/ai-check.'
+    elif status == 402:
+        msg = 'نفد رصيد OpenRouter (402) — أضِف رصيداً للحساب. افحص /api/ai-check.'
+    elif status == 404:
+        msg = f'النموذج «{AI_MODEL}» غير متاح (404) — بدّله عبر متغيّر AI_MODEL. افحص /api/ai-check.'
+    elif reason:
+        msg = f'تعذّر التوليد — سبب الـ AI: {reason}. افحص /api/ai-check للتفاصيل.'
+    else:
+        msg = 'تعذّر الاتصال بالذكاء الاصطناعي أو نفد الرصيد — لم تتم كتابة أي تقييم. افحص /api/ai-check.'
     return jsonify({
         'error': 'ai_unavailable',
-        'message': 'تعذّر الاتصال بالذكاء الاصطناعي أو نفد الرصيد — لم تتم كتابة أي تقييم.',
+        'message': msg,
+        'ai_status': status,
+        'ai_error': reason,
     }), 503
 
 @app.route('/api/generate', methods=['POST'])
@@ -1212,9 +1338,11 @@ def api_generate_stream():
             yield _sse({'step': 'done', 'icon': '🎉', 'msg': 'اكتمل التوليد!', 'data': data})
 
         except AIUnavailable:
-            # تعذّر الـ AI (انقطاع/نفاد رصيد) — نتوقف ولا نكتب قوالب
+            # تعذّر الـ AI (انقطاع/نفاد رصيد/مفتاح) — نتوقف ونكشف السبب الحقيقي
+            _resp = _ai_unavailable_response()[0].get_json()
             yield _sse({'step': 'error', 'icon': '🛑', 'fatal': True,
-                        'msg': 'تعذّر الاتصال بالذكاء الاصطناعي أو نفد الرصيد — توقّفت الكتابة.'})
+                        'msg': _resp.get('message', 'تعذّر الاتصال بالذكاء الاصطناعي.'),
+                        'ai_status': _resp.get('ai_status')})
         except Exception as e:
             yield _sse({'step': 'error', 'msg': str(e), 'icon': '❌'})
 
