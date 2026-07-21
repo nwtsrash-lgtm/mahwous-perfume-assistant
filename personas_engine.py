@@ -1405,6 +1405,9 @@ def build_master_prompt(persona, product_name, review_params, used_texts_block='
         length_rule = f'من 1 إلى {max_words} كلمات فقط لا أكثر أبداً'
         examples_note = 'التزم بنفس القصر'
 
+    # max_words غير معرّف في فرع len_target؛ التقييم كسول فلا يُقيَّم إلا عند الحاجة الفعلية
+    _eff_max_words = len_target if len_target else max_words
+
     typo_rule = 'أضف خطأ إملائي طبيعي واحد' if persona.get('has_typo') else 'بدون أخطاء إملائية'
 
     # أمثلة أسلوبية من نصوص المنافسين الحقيقية قرب الطول المستهدف — مرجعية
@@ -1436,6 +1439,26 @@ def build_master_prompt(persona, product_name, review_params, used_texts_block='
             prompt += '\n\n' + _hz.anti_tell_line()
     except Exception:
         pass
+
+    # ══ سياق بشري + ذكاء زمني + لمسة SEO — كتلة موحّدة لكلا المدخلين ══
+    # extra_block يُبنى في app.py/streamlit_app.py (تنبيهات هدية/نوع منتج/cross-sell)
+    # ويُمرَّر هنا لكنه كان يُهمَل تماماً (معامل ميت) — هذا يُصلحه، ويضيف معه ثلاث كتل
+    # كانت معرَّفة ومُختبرة لكن غير موصولة بمسار الإنتاج: pick_human_context/
+    # build_temporal_block/build_seo_block. التوصيل هنا (لا في المدخلين) يضمن سلوكاً
+    # واحداً لـ app.py و streamlit_app.py معاً — لا تفرّع.
+    _extra_parts = [extra_block] if extra_block else []
+    if random.random() < 0.35:
+        _ctx = pick_human_context(persona)
+        if _ctx:
+            _extra_parts.append(f'## زاوية شخصية (اربطها بعفوية إن ناسب، لا تُقحمها):\n- {_ctx}')
+    _seo = build_seo_block(persona, review_params.get('pattern', ''), max_words=_eff_max_words)
+    if _seo:
+        _extra_parts.append(_seo)
+    _temporal = build_temporal_block()
+    if _temporal:
+        _extra_parts.append(_temporal)
+    if _extra_parts:
+        prompt += '\n\n' + '\n\n'.join(_extra_parts)
 
     return prompt, review_params
 
